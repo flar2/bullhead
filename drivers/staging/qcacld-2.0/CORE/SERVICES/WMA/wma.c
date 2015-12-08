@@ -17977,6 +17977,61 @@ static int wma_flush_complete_evt_handler(void *handle,
 
 #ifdef FEATURE_WLAN_EXTSCAN
 /**
+ * wma_extscan_get_eventid_from_tlvtag() - map tlv tag to corresponding event id
+ * @tag: WMI TLV tag
+ *
+ * Return:
+ *	0 if TLV tag is invalid
+ *	else return corresponding WMI event id
+ */
+static int wma_extscan_get_eventid_from_tlvtag(uint32_t tag)
+{
+	uint32_t event_id;
+
+	switch (tag) {
+	case WMITLV_TAG_STRUC_wmi_extscan_start_stop_event_fixed_param:
+		event_id = WMI_EXTSCAN_START_STOP_EVENTID;
+		break;
+
+	case WMITLV_TAG_STRUC_wmi_extscan_operation_event_fixed_param:
+		event_id = WMI_EXTSCAN_OPERATION_EVENTID;
+		break;
+
+	case WMITLV_TAG_STRUC_wmi_extscan_table_usage_event_fixed_param:
+		event_id = WMI_EXTSCAN_TABLE_USAGE_EVENTID;
+		break;
+
+	case WMITLV_TAG_STRUC_wmi_extscan_cached_results_event_fixed_param:
+		event_id = WMI_EXTSCAN_CACHED_RESULTS_EVENTID;
+		break;
+
+	case WMITLV_TAG_STRUC_wmi_extscan_wlan_change_results_event_fixed_param:
+		event_id = WMI_EXTSCAN_WLAN_CHANGE_RESULTS_EVENTID;
+		break;
+
+	case WMITLV_TAG_STRUC_wmi_extscan_hotlist_match_event_fixed_param:
+		event_id = WMI_EXTSCAN_HOTLIST_MATCH_EVENTID;
+		break;
+
+	case WMITLV_TAG_STRUC_wmi_extscan_capabilities_event_fixed_param:
+		event_id = WMI_EXTSCAN_CAPABILITIES_EVENTID;
+		break;
+
+	case WMITLV_TAG_STRUC_wmi_extscan_hotlist_ssid_match_event_fixed_param:
+		event_id = WMI_EXTSCAN_HOTLIST_SSID_MATCH_EVENTID;
+		break;
+
+	default:
+		event_id = 0;
+		WMA_LOGE("%s: Unknown tag: %d", __func__, tag);
+		break;
+	}
+
+	WMA_LOGI("%s: For tag %d WMI event 0x%x", __func__, tag, event_id);
+	return event_id;
+}
+
+/**
  * wma_extscan_wow_event_callback() - extscan wow event callback
  * @handle: WMA handle
  * @event: event buffer
@@ -17994,86 +18049,74 @@ static int wma_flush_complete_evt_handler(void *handle,
 static void wma_extscan_wow_event_callback(void *handle, void *event,
 					  uint32_t len)
 {
+	uint32_t id;
+	int tlv_ok_status = 0;
+	void *wmi_cmd_struct_ptr = NULL;
 	uint32_t tag = WMITLV_GET_TLVTAG(WMITLV_GET_HDR(event));
-	WMA_LOGI("%s: Enter  Tag: %d", __func__, tag);
+
+	id = wma_extscan_get_eventid_from_tlvtag(tag);
+	if (!id) {
+		WMA_LOGE("%s: Invalid  Tag: %d", __func__, tag);
+		return;
+	}
+
+	tlv_ok_status = wmitlv_check_and_pad_event_tlvs(
+				handle, event, len, id,
+				&wmi_cmd_struct_ptr);
+	if (tlv_ok_status != 0) {
+		WMA_LOGE("%s: Invalid Tag: %d could not check and pad tlvs",
+			 __func__, tag);
+		return;
+	}
 
 	switch (tag) {
 	case WMITLV_TAG_STRUC_wmi_extscan_start_stop_event_fixed_param:
-		{
-			WMI_EXTSCAN_START_STOP_EVENTID_param_tlvs param;
-			param.fixed_param = event;
-			wma_extscan_start_stop_event_handler(handle,
-					(uint8_t *)&param, sizeof(param));
-			break;
-		}
+		wma_extscan_start_stop_event_handler(handle,
+				wmi_cmd_struct_ptr, len);
+		break;
 
 	case WMITLV_TAG_STRUC_wmi_extscan_operation_event_fixed_param:
-		{
-			WMI_EXTSCAN_OPERATION_EVENTID_param_tlvs param;
-			param.fixed_param = event;
-			wma_extscan_operations_event_handler(handle,
-					(uint8_t *)&param, sizeof(param));
-			break;
-		}
+		wma_extscan_operations_event_handler(handle,
+				wmi_cmd_struct_ptr, len);
+		break;
 
 	case WMITLV_TAG_STRUC_wmi_extscan_table_usage_event_fixed_param:
-		{
-			WMI_EXTSCAN_TABLE_USAGE_EVENTID_param_tlvs param;
-			param.fixed_param = event;
-			wma_extscan_table_usage_event_handler(handle,
-					(uint8_t *)&param, sizeof(param));
-			break;
-		}
+		wma_extscan_table_usage_event_handler(handle,
+				wmi_cmd_struct_ptr, len);
+		break;
 
 	case WMITLV_TAG_STRUC_wmi_extscan_cached_results_event_fixed_param:
-		{
-			WMI_EXTSCAN_CACHED_RESULTS_EVENTID_param_tlvs param;
-			param.fixed_param = event;
-			wma_extscan_cached_results_event_handler(handle,
-					(uint8_t *)&param, sizeof(param));
-			break;
-		}
+		wma_extscan_cached_results_event_handler(handle,
+				wmi_cmd_struct_ptr, len);
+		break;
 
 	case WMITLV_TAG_STRUC_wmi_extscan_wlan_change_results_event_fixed_param:
-		{
-			WMI_EXTSCAN_WLAN_CHANGE_RESULTS_EVENTID_param_tlvs param;
-			param.fixed_param = event;
-			wma_extscan_change_results_event_handler(handle,
-					(uint8_t *)&param, sizeof(param));
-			break;
-		}
+		wma_extscan_change_results_event_handler(handle,
+				wmi_cmd_struct_ptr, len);
+		break;
 
 	case WMITLV_TAG_STRUC_wmi_extscan_hotlist_match_event_fixed_param:
-		{
-			WMI_EXTSCAN_HOTLIST_MATCH_EVENTID_param_tlvs param;
-			param.fixed_param = event;
-			wma_extscan_hotlist_match_event_handler(handle,
-					(uint8_t *)&param, sizeof(param));
-			break;
-		}
+		wma_extscan_hotlist_match_event_handler(handle,
+				wmi_cmd_struct_ptr, len);
+		break;
 
 	case WMITLV_TAG_STRUC_wmi_extscan_capabilities_event_fixed_param:
-		{
-			WMI_EXTSCAN_CAPABILITIES_EVENTID_param_tlvs param;
-			param.fixed_param = event;
-			wma_extscan_capabilities_event_handler(handle,
-					(uint8_t *)&param, sizeof(param));
-			break;
-		}
+		wma_extscan_capabilities_event_handler(handle,
+				wmi_cmd_struct_ptr, len);
+		break;
 
 	case WMITLV_TAG_STRUC_wmi_extscan_hotlist_ssid_match_event_fixed_param:
-		{
-			WMI_EXTSCAN_HOTLIST_SSID_MATCH_EVENTID_param_tlvs param;
-			param.fixed_param = event;
-			wma_extscan_hotlist_ssid_match_event_handler(handle,
-					(uint8_t *)&param, sizeof(param));
-			break;
-		}
+		wma_extscan_hotlist_ssid_match_event_handler(handle,
+				wmi_cmd_struct_ptr, len);
+		break;
 
 	default:
 		WMA_LOGE("%s: Unknown tag: %d", __func__, tag);
 		break;
 	}
+	wmitlv_free_allocated_event_tlvs(id, &wmi_cmd_struct_ptr);
+
+	return;
 }
 #endif
 
@@ -19262,6 +19305,9 @@ pdev_resume:
 	/* unpause the vdev if left paused and hif_pci_suspend fails */
 	wma_unpause_vdev(wma);
 
+	if (runtime_pm)
+		vos_runtime_pm_allow_suspend();
+
 	return ret;
 }
 
@@ -19688,6 +19734,7 @@ static VOS_STATUS wma_suspend_req(tp_wma_handle wma, tpSirWlanSuspendParam info)
 
 	if (info == NULL) {
 		WMA_LOGD("runtime PM: Request to suspend all interfaces");
+		wmi_set_runtime_pm_inprogress(wma->wmi_handle, TRUE);
 		goto suspend_all_iface;
 	}
 
@@ -19845,7 +19892,6 @@ send_ready_to_suspend:
 	wma_set_wow_bus_suspend(wma, 1);
 
 	wma_send_status_to_suspend_ind(wma, TRUE, info == NULL);
-
 
 	return VOS_STATUS_SUCCESS;
 }
@@ -21155,6 +21201,7 @@ static VOS_STATUS wma_enable_arp_ns_offload(tp_wma_handle wma, tpSirHostOffloadR
 	wmi_buf_t buf;
 	int32_t len;
 	u_int8_t vdev_id;
+	uint32_t count = 0, num_ns_ext_tuples = 0;
 
 	/* Get the vdev id */
 	if (!wma_find_vdev_by_bssid(wma, pHostOffloadParams->bssId, &vdev_id)) {
@@ -21170,11 +21217,30 @@ static VOS_STATUS wma_enable_arp_ns_offload(tp_wma_handle wma, tpSirHostOffloadR
 		return VOS_STATUS_E_FAILURE;
 	}
 
+	if (!bArpOnly)
+		count = pHostOffloadParams->num_ns_offload_count;
+
 	len = sizeof(WMI_SET_ARP_NS_OFFLOAD_CMD_fixed_param) +
 		WMI_TLV_HDR_SIZE + // TLV place holder size for array of NS tuples
 		WMI_MAX_NS_OFFLOADS*sizeof(WMI_NS_OFFLOAD_TUPLE) +
 		WMI_TLV_HDR_SIZE + // TLV place holder size for array of ARP tuples
 		WMI_MAX_ARP_OFFLOADS*sizeof(WMI_ARP_OFFLOAD_TUPLE);
+
+	/*
+	 * If there are more than WMI_MAX_NS_OFFLOADS addresses then allocate
+	 * extra length for extended NS offload tuples which follows ARP offload
+	 * tuples. Host needs to fill this structure in following format:
+	 * 2 NS ofload tuples
+	 * 2 ARP offload tuples
+	 * N numbers of extended NS offload tuples if HDD has given more than
+	 * 2 NS offload addresses
+	 */
+	if (!bArpOnly && count > WMI_MAX_NS_OFFLOADS) {
+		num_ns_ext_tuples = count - WMI_MAX_NS_OFFLOADS;
+		len += WMI_TLV_HDR_SIZE + num_ns_ext_tuples *
+					sizeof(WMI_NS_OFFLOAD_TUPLE);
+	}
+
 	buf = wmi_buf_alloc(wma->wmi_handle, len);
 	if (!buf) {
 		WMA_LOGE("%s: wmi_buf_alloc failed", __func__);
@@ -21189,6 +21255,8 @@ static VOS_STATUS wma_enable_arp_ns_offload(tp_wma_handle wma, tpSirHostOffloadR
 			WMITLV_GET_STRUCT_TLVLEN(WMI_SET_ARP_NS_OFFLOAD_CMD_fixed_param));
 	cmd->flags = 0;
 	cmd->vdev_id = vdev_id;
+	if (!bArpOnly)
+		cmd->num_ns_ext_tuples = num_ns_ext_tuples;
 
 	WMA_LOGD("ARP NS Offload vdev_id: %d",cmd->vdev_id);
 
@@ -21208,22 +21276,19 @@ static VOS_STATUS wma_enable_arp_ns_offload(tp_wma_handle wma, tpSirHostOffloadR
 
 		/* Fill data only for NS offload in the first ARP tuple for LA */
 		if (!bArpOnly  &&
-		   ((pHostOffloadParams->enableOrDisable & SIR_OFFLOAD_ENABLE) && i==0)) {
+		   ((pHostOffloadParams->enableOrDisable & SIR_OFFLOAD_ENABLE))) {
 			ns_tuple->flags |= WMI_NSOFF_FLAGS_VALID;
 
 #ifdef WLAN_NS_OFFLOAD
 			/*Copy the target/solicitation/remote ip addr */
-			if(pHostOffloadParams->nsOffloadInfo.targetIPv6AddrValid[0])
+			if(pHostOffloadParams->nsOffloadInfo.targetIPv6AddrValid[i])
 				A_MEMCPY(&ns_tuple->target_ipaddr[0],
-				&pHostOffloadParams->nsOffloadInfo.targetIPv6Addr[0],sizeof(WMI_IPV6_ADDR));
-			if(pHostOffloadParams->nsOffloadInfo.targetIPv6AddrValid[1])
-				A_MEMCPY(&ns_tuple->target_ipaddr[1],
-				&pHostOffloadParams->nsOffloadInfo.targetIPv6Addr[1],sizeof(WMI_IPV6_ADDR));
+				&pHostOffloadParams->nsOffloadInfo.targetIPv6Addr[i], sizeof(WMI_IPV6_ADDR));
 			A_MEMCPY(&ns_tuple->solicitation_ipaddr,
-				&pHostOffloadParams->nsOffloadInfo.selfIPv6Addr,sizeof(WMI_IPV6_ADDR));
-			WMA_LOGD("NS solicitedIp: %pI6, targetIp: %pI6",
-				pHostOffloadParams->nsOffloadInfo.selfIPv6Addr,
-				pHostOffloadParams->nsOffloadInfo.targetIPv6Addr[0]);
+				&pHostOffloadParams->nsOffloadInfo.selfIPv6Addr[i], sizeof(WMI_IPV6_ADDR));
+			WMA_LOGD("Index %d NS solicitedIp: %pI6, targetIp: %pI6", i,
+				&pHostOffloadParams->nsOffloadInfo.selfIPv6Addr[i],
+				&pHostOffloadParams->nsOffloadInfo.targetIPv6Addr[i]);
 
 			/* target MAC is optional, check if it is valid, if this is not valid,
 			* the target will use the known local MAC address rather than the tuple */
@@ -21259,13 +21324,56 @@ static VOS_STATUS wma_enable_arp_ns_offload(tp_wma_handle wma, tpSirHostOffloadR
 		buf_ptr += sizeof(WMI_ARP_OFFLOAD_TUPLE);
 	}
 
+	/* Populate extended NS offload tuples */
+	WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_STRUC,
+					(num_ns_ext_tuples*sizeof(WMI_NS_OFFLOAD_TUPLE)));
+	buf_ptr += WMI_TLV_HDR_SIZE;
+
+	if (num_ns_ext_tuples) {
+		for(i = WMI_MAX_NS_OFFLOADS; i < count; i++ ){
+			ns_tuple = (WMI_NS_OFFLOAD_TUPLE *)buf_ptr;
+			WMITLV_SET_HDR(&ns_tuple->tlv_header,
+				WMITLV_TAG_STRUC_WMI_NS_OFFLOAD_TUPLE,
+				(sizeof(WMI_NS_OFFLOAD_TUPLE)-WMI_TLV_HDR_SIZE));
+
+			/* Fill data only for NS offload in the first ARP tuple for LA */
+			if (!bArpOnly  &&
+				((pHostOffloadParams->enableOrDisable & SIR_OFFLOAD_ENABLE))) {
+				ns_tuple->flags |= WMI_NSOFF_FLAGS_VALID;
+#ifdef WLAN_NS_OFFLOAD
+				/*Copy the target/solicitation/remote ip addr */
+				if(pHostOffloadParams->nsOffloadInfo.targetIPv6AddrValid[i])
+					A_MEMCPY(&ns_tuple->target_ipaddr[0],
+						&pHostOffloadParams->nsOffloadInfo.targetIPv6Addr[i],
+						sizeof(WMI_IPV6_ADDR));
+				A_MEMCPY(&ns_tuple->solicitation_ipaddr,
+					&pHostOffloadParams->nsOffloadInfo.selfIPv6Addr[i],
+					sizeof(WMI_IPV6_ADDR));
+				WMA_LOGD("Index %d NS solicitedIp: %pI6, targetIp: %pI6", i,
+					&pHostOffloadParams->nsOffloadInfo.selfIPv6Addr[i],
+					&pHostOffloadParams->nsOffloadInfo.targetIPv6Addr[i]);
+
+				/* target MAC is optional, check if it is valid, if this is not valid,
+				 * the target will use the known local MAC address rather than the tuple */
+				 WMI_CHAR_ARRAY_TO_MAC_ADDR(pHostOffloadParams->nsOffloadInfo.selfMacAddr,
+					&ns_tuple->target_mac);
+#endif
+				if ((ns_tuple->target_mac.mac_addr31to0 != 0) ||
+					(ns_tuple->target_mac.mac_addr47to32 != 0)) {
+					ns_tuple->flags |= WMI_NSOFF_FLAGS_MAC_VALID;
+				}
+			}
+			buf_ptr += sizeof(WMI_NS_OFFLOAD_TUPLE);
+		}
+	}
+
 	res = wmi_unified_cmd_send(wma->wmi_handle, buf, len, WMI_SET_ARP_NS_OFFLOAD_CMDID);
 	if(res) {
 		WMA_LOGE("Failed to enable ARP NDP/NSffload");
 		wmi_buf_free(buf);
 		vos_mem_free(pHostOffloadParams);
 		return VOS_STATUS_E_FAILURE;
-        }
+	}
 
 	vos_mem_free(pHostOffloadParams);
 	return VOS_STATUS_SUCCESS;
@@ -29789,7 +29897,6 @@ int wma_runtime_suspend_req(WMA_HANDLE handle)
 	int ret = 0;
 	tp_wma_handle wma = (tp_wma_handle) handle;
 
-	wmi_set_runtime_pm_inprogress(wma->wmi_handle, TRUE);
 	vos_event_reset(&wma->runtime_suspend);
 
 	vosMessage.bodyptr = NULL;
@@ -29798,7 +29905,7 @@ int wma_runtime_suspend_req(WMA_HANDLE handle)
 
 	if (!VOS_IS_STATUS_SUCCESS(vosStatus)) {
 		ret = -EAGAIN;
-		goto out;
+		return ret;
 	}
 
 	if (vos_wait_single_event(&wma->runtime_suspend,
@@ -29806,7 +29913,6 @@ int wma_runtime_suspend_req(WMA_HANDLE handle)
 			VOS_STATUS_SUCCESS) {
 		WMA_LOGE("Failed to get runtime suspend event");
 		ret = -EAGAIN;
-		wma_runtime_resume_req(wma);
 		goto out;
 	}
 
@@ -29818,7 +29924,8 @@ int wma_runtime_suspend_req(WMA_HANDLE handle)
 	}
 out:
 	if (ret)
-		wmi_set_runtime_pm_inprogress(wma->wmi_handle, FALSE);
+		wma_runtime_resume_req(wma);
+
 	return ret;
 }
 
@@ -29828,6 +29935,8 @@ int wma_runtime_resume_req(WMA_HANDLE handle)
 	VOS_STATUS vosStatus = VOS_STATUS_SUCCESS;
 	int ret = 0;
 
+	vos_runtime_pm_prevent_suspend();
+
 	vosMessage.bodyptr = NULL;
 	vosMessage.type    = WDA_RUNTIME_PM_RESUME_IND;
 	vosStatus = vos_mq_post_message(VOS_MQ_ID_WDA, &vosMessage );
@@ -29835,6 +29944,7 @@ int wma_runtime_resume_req(WMA_HANDLE handle)
 	if (!VOS_IS_STATUS_SUCCESS(vosStatus)) {
 		WMA_LOGE("Failed to post Runtime PM Resume IND to VOS");
 		ret = -EAGAIN;
+		vos_runtime_pm_allow_suspend();
 	}
 
 	return ret;

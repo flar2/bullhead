@@ -677,8 +677,8 @@ int wmi_unified_cmd_send(wmi_unified_t wmi_handle, wmi_buf_t buf, int len,
 	if (adf_os_atomic_read(&wmi_handle->is_target_suspended) &&
 			( (WMI_WOW_HOSTWAKEUP_FROM_SLEEP_CMDID != cmd_id) &&
 			  (WMI_PDEV_RESUME_CMDID != cmd_id)) ) {
-		pr_err("%s: Target is suspended  could not send WMI command\n",
-				__func__);
+		pr_err("%s: Target is suspended  could not send WMI command: %d\n",
+				__func__, cmd_id);
 		VOS_ASSERT(0);
 		return -EBUSY;
 	} else
@@ -904,11 +904,9 @@ void wmi_control_rx(void *ctx, HTC_PACKET *htc_packet)
 					data, len, id,
 					&wmi_cmd_struct_ptr);
 		if (tlv_ok_status != 0) {
-			if (tlv_ok_status == 1) {
-				wmi_cmd_struct_ptr = data;
-			} else {
-				return;
-			}
+			WMA_LOGE("Error: id=0x%x, wmitlv_check_and_pad_tlvs ret=%d",
+				id, tlv_ok_status);
+			return;
 		}
 
 		idx = wmi_unified_get_event_handler_ix(wmi_handle, id);

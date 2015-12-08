@@ -1056,6 +1056,9 @@ eCsrRoamState csrRoamStateChange( tpAniSirGlobal pMac, eCsrRoamState NewRoamStat
 void csrAssignRssiForCategory(tpAniSirGlobal pMac, tANI_S8 bestApRssi, tANI_U8 catOffset)
 {
     int i;
+
+    smsLog(pMac, LOG2, FL("best AP RSSI:%d, cat offset:%d"), bestApRssi,
+           catOffset);
     if(catOffset)
     {
         pMac->roam.configParam.bCatRssiOffset = catOffset;
@@ -1784,7 +1787,10 @@ eHalStatus csrChangeDefaultConfigParam(tpAniSirGlobal pMac, tCsrConfigParam *pPa
             pMac->roam.configParam.scanAgeTimeCPS = pParam->scanAgeTimeCPS;
         }
 
-        csrAssignRssiForCategory(pMac, CSR_BEST_RSSI_VALUE, pParam->bCatRssiOffset);
+        pMac->first_scan_bucket_threshold =
+                                pParam->first_scan_bucket_threshold;
+        csrAssignRssiForCategory(pMac, pMac->first_scan_bucket_threshold,
+                                pParam->bCatRssiOffset);
         pMac->roam.configParam.nRoamingTime = pParam->nRoamingTime;
         pMac->roam.configParam.fEnforce11dChannels = pParam->fEnforce11dChannels;
         pMac->roam.configParam.fSupplicantCountryCodeHasPriority = pParam->fSupplicantCountryCodeHasPriority;
@@ -2069,6 +2075,8 @@ eHalStatus csrGetConfigParam(tpAniSirGlobal pMac, tCsrConfigParam *pParam)
 
         pParam->obssEnabled = pMac->roam.configParam.obssEnabled;
 
+        pParam->first_scan_bucket_threshold =
+                     pMac->first_scan_bucket_threshold;
         status = eHAL_STATUS_SUCCESS;
     }
     return (status);
@@ -18422,6 +18430,9 @@ void csrRoamFTPreAuthRspProcessor( tHalHandle hHal, tpSirFTPreAuthRsp pFTPreAuth
       pMac->roam.roamSession[sessionId].connectedProfile.AuthType;
 
    pSession->ftSmeContext.addMDIE = FALSE;
+   // Done with it, init it.
+   pSession->ftSmeContext.psavedFTPreAuthRsp = NULL;
+
    if (csrRoamIs11rAssoc(pMac, pFTPreAuthRsp->smeSessionId) &&
       (conn_Auth_type == eCSR_AUTH_TYPE_OPEN_SYSTEM))
    {
@@ -18435,6 +18446,9 @@ void csrRoamFTPreAuthRspProcessor( tHalHandle hHal, tpSirFTPreAuthRsp pFTPreAuth
          pSession->ftSmeContext.reassoc_ft_ies_length = 0;
          pSession->ftSmeContext.reassoc_ft_ies = NULL;
       }
+
+      if (!ft_ies_length)
+         return;
 
       pSession->ftSmeContext.reassoc_ft_ies = vos_mem_malloc(ft_ies_length);
       if ( NULL == pSession->ftSmeContext.reassoc_ft_ies )
@@ -18452,9 +18466,6 @@ void csrRoamFTPreAuthRspProcessor( tHalHandle hHal, tpSirFTPreAuthRsp pFTPreAuth
          pSession->ftSmeContext.addMDIE = TRUE;
       }
    }
-
-   // Done with it, init it.
-   pSession->ftSmeContext.psavedFTPreAuthRsp = NULL;
 }
 #endif
 

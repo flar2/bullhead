@@ -2963,22 +2963,22 @@ This feature requires the dependent cfg.ini "gRoamPrefer5GHz" set to 1 */
 
 #ifdef FEATURE_WLAN_EXTSCAN
 #define CFG_EXTSCAN_PASSIVE_MAX_CHANNEL_TIME_NAME      "gExtScanPassiveMaxChannelTime"
-#define CFG_EXTSCAN_PASSIVE_MAX_CHANNEL_TIME_MIN       (110)
+#define CFG_EXTSCAN_PASSIVE_MAX_CHANNEL_TIME_MIN       (0)
 #define CFG_EXTSCAN_PASSIVE_MAX_CHANNEL_TIME_MAX       (500)
 #define CFG_EXTSCAN_PASSIVE_MAX_CHANNEL_TIME_DEFAULT   (110)
 
 #define CFG_EXTSCAN_PASSIVE_MIN_CHANNEL_TIME_NAME      "gExtScanPassiveMinChannelTime"
-#define CFG_EXTSCAN_PASSIVE_MIN_CHANNEL_TIME_MIN       (60)
+#define CFG_EXTSCAN_PASSIVE_MIN_CHANNEL_TIME_MIN       (0)
 #define CFG_EXTSCAN_PASSIVE_MIN_CHANNEL_TIME_MAX       (500)
 #define CFG_EXTSCAN_PASSIVE_MIN_CHANNEL_TIME_DEFAULT   (60)
 
 #define CFG_EXTSCAN_ACTIVE_MAX_CHANNEL_TIME_NAME       "gExtScanActiveMaxChannelTime"
-#define CFG_EXTSCAN_ACTIVE_MAX_CHANNEL_TIME_MIN        (40)
+#define CFG_EXTSCAN_ACTIVE_MAX_CHANNEL_TIME_MIN        (0)
 #define CFG_EXTSCAN_ACTIVE_MAX_CHANNEL_TIME_MAX        (110)
 #define CFG_EXTSCAN_ACTIVE_MAX_CHANNEL_TIME_DEFAULT    (40)
 
 #define CFG_EXTSCAN_ACTIVE_MIN_CHANNEL_TIME_NAME       "gExtScanActiveMinChannelTime"
-#define CFG_EXTSCAN_ACTIVE_MIN_CHANNEL_TIME_MIN        (20)
+#define CFG_EXTSCAN_ACTIVE_MIN_CHANNEL_TIME_MIN        (0)
 #define CFG_EXTSCAN_ACTIVE_MIN_CHANNEL_TIME_MAX        (110)
 #define CFG_EXTSCAN_ACTIVE_MIN_CHANNEL_TIME_DEFAULT    (20)
 #endif
@@ -2991,6 +2991,19 @@ This feature requires the dependent cfg.ini "gRoamPrefer5GHz" set to 1 */
 #define CFG_INFORM_BSS_RSSI_RAW_MIN                (0)
 #define CFG_INFORM_BSS_RSSI_RAW_MAX                (1)
 #define CFG_INFORM_BSS_RSSI_RAW_DEFAULT            (1)
+
+/*
+ * This parameter will configure the first scan bucket
+ * threshold to the mentioned value and all the AP's which
+ * have RSSI under this threshold will fall under this
+ * bucket.
+ * This is a configuration item used to tweak and test the input
+ * for internal algorithm. It should not be modified externally.
+ */
+#define CFG_FIRST_SCAN_BUCKET_THRESHOLD_NAME      "gfirst_scan_bucket_threshold"
+#define CFG_FIRST_SCAN_BUCKET_THRESHOLD_MIN       (-50)
+#define CFG_FIRST_SCAN_BUCKET_THRESHOLD_MAX       (-30)
+#define CFG_FIRST_SCAN_BUCKET_THRESHOLD_DEFAULT   (-30)
 
 /*---------------------------------------------------------------------------
   Type declarations
@@ -3630,6 +3643,7 @@ typedef struct
    uint32_t                    extscan_active_min_chn_time;
 #endif
    uint8_t                     inform_bss_rssi_raw;
+   int8_t                      first_scan_bucket_threshold;
 } hdd_config_t;
 
 #ifdef WLAN_FEATURE_MBSSID
