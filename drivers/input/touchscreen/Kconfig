@@ -1072,10 +1072,4 @@ config INPUT_MT_WRAPPER
 
 	  If unsure, say N.
 
-config SWEEP2SLEEP
-        tristate "Sweep to put device to sleep"
-        default y
-        help
-          Say Y here to support sweep2sleep
-
 endif
