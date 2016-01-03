@@ -1637,6 +1637,12 @@ static void qpnp_hap_td_enable(struct timed_output_dev *dev, int value)
 		}
 		hap->state = 0;
 	} else {
+
+		if (hap->vmax_mv_haptic == QPNP_HAP_VMAX_MIN_MV) {
+			mutex_unlock(&hap->lock);
+			return;
+		}
+
 		if (value >= CALL_ALARM_TIME_THRESHOLD
 				&& hap->vmax_mv_ind > 0
 				&& hap->vmax_mv != hap->vmax_mv_ind){
