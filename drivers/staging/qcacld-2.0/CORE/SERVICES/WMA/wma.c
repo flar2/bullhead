@@ -2131,6 +2131,7 @@ static void wma_update_vdev_stats(tp_wma_handle wma,
 	tANI_U8 i;
 	v_S7_t rssi = 0;
 	tAniGetRssiReq *pGetRssiReq = (tAniGetRssiReq*)wma->pGetRssiReq;
+	int8_t bcn_snr, dat_snr;
 
 	node = &wma->interfaces[vdev_stats->vdev_id];
 	stats_rsp_params = node->stats_rsp;
@@ -2160,11 +2161,15 @@ static void wma_update_vdev_stats(tp_wma_handle wma,
 			summary_stats->rts_fail_cnt = vdev_stats->rts_fail_cnt;
 		}
 	}
+	bcn_snr = vdev_stats->vdev_snr.bcn_snr;
+	dat_snr = vdev_stats->vdev_snr.dat_snr;
 
 	if (pGetRssiReq &&
 		pGetRssiReq->sessionId == vdev_stats->vdev_id) {
-		if ((vdev_stats->vdev_snr.bcn_snr == WMA_TGT_INVALID_SNR) &&
-			(vdev_stats->vdev_snr.dat_snr == WMA_TGT_INVALID_SNR)) {
+		if ((bcn_snr == WMA_TGT_INVALID_SNR_OLD ||
+			bcn_snr == WMA_TGT_INVALID_SNR_NEW) &&
+			(dat_snr == WMA_TGT_INVALID_SNR_OLD ||
+			 dat_snr == WMA_TGT_INVALID_SNR_NEW)) {
 			/*
 			 * Firmware sends invalid snr till it sees
 			 * Beacon/Data after connection since after
@@ -2174,10 +2179,12 @@ static void wma_update_vdev_stats(tp_wma_handle wma,
 			 */
 			rssi = wma->first_rssi;
 		} else {
-			if (vdev_stats->vdev_snr.bcn_snr != WMA_TGT_INVALID_SNR) {
-				rssi = vdev_stats->vdev_snr.bcn_snr;
-			} else if (vdev_stats->vdev_snr.dat_snr != WMA_TGT_INVALID_SNR) {
-				rssi = vdev_stats->vdev_snr.dat_snr;
+			if (bcn_snr != WMA_TGT_INVALID_SNR_OLD &&
+				bcn_snr != WMA_TGT_INVALID_SNR_NEW) {
+				rssi = bcn_snr;
+			} else if (dat_snr != WMA_TGT_INVALID_SNR_OLD &&
+					dat_snr != WMA_TGT_INVALID_SNR_NEW) {
+				rssi = dat_snr;
 			}
 
 			/*
@@ -2189,8 +2196,7 @@ static void wma_update_vdev_stats(tp_wma_handle wma,
 
 		WMA_LOGD("vdev id %d beancon snr %d data snr %d",
 				vdev_stats->vdev_id,
-				vdev_stats->vdev_snr.bcn_snr,
-				vdev_stats->vdev_snr.dat_snr);
+				bcn_snr, dat_snr);
 		WMA_LOGD("Average Rssi = %d, vdev id= %d", rssi,
 				pGetRssiReq->sessionId);
 
@@ -6689,6 +6695,13 @@ static void wma_set_sta_keep_alive(tp_wma_handle wma, u_int8_t vdev_id,
 	int len;
 
 	WMA_LOGD("%s: Enter", __func__);
+
+	if (timeperiod > WNI_CFG_INFRA_STA_KEEP_ALIVE_PERIOD_STAMAX) {
+		WMA_LOGE("Invalid period %d Max limit %d", timeperiod,
+				 WNI_CFG_INFRA_STA_KEEP_ALIVE_PERIOD_STAMAX);
+		return;
+	}
+
 	len = sizeof(*cmd) + sizeof(*arp_rsp);
 	buf = wmi_buf_alloc(wma->wmi_handle, len);
 	if (!buf) {
@@ -18762,8 +18775,14 @@ VOS_STATUS wma_enable_d0wow_in_fw(tp_wma_handle wma)
 			"Credits: %d, pending_cmds: %d",
 			wmi_get_host_credits(wma->wmi_handle),
 			wmi_get_pending_cmds(wma->wmi_handle));
-		VOS_BUG(0);
-		return VOS_STATUS_E_FAILURE;
+
+		if (vos_is_logp_in_progress(VOS_MODULE_ID_WDA, NULL)) {
+			VOS_ASSERT(0);
+			return VOS_STATUS_E_FAILURE;
+		} else {
+			VOS_BUG(0);
+			return VOS_STATUS_E_FAILURE;
+		}
 	}
 
 	if (wma->wow_nack) {
@@ -19950,7 +19969,7 @@ static VOS_STATUS wma_send_host_wakeup_ind_to_fw(tp_wma_handle wma)
 		WMA_LOGP("%s: Pending commands %d credits %d", __func__,
 				wmi_get_pending_cmds(wma->wmi_handle),
 				wmi_get_host_credits(wma->wmi_handle));
-		if (!vos_is_logp_in_progress(VOS_MODULE_ID_HIF, NULL)) {
+		if (!vos_is_logp_in_progress(VOS_MODULE_ID_WDA, NULL)) {
 #ifdef CONFIG_CNSS
 			if (pMac->sme.enableSelfRecovery) {
 				vos_trigger_recovery();
@@ -26607,6 +26626,43 @@ VOS_STATUS wma_wmi_service_close(v_VOID_t *vos_ctx)
 
 	adf_os_mem_free(((pVosContextType) vos_ctx)->cfg_ctx);
 	WMA_LOGD("%s: Exit", __func__);
+	return VOS_STATUS_SUCCESS;
+}
+
+/**
+ * wma_wmi_work_close() - close the work queue items associated with WMI
+ * @vos_ctx:	Pointer to vos context
+ *
+ * This function closes work queue items associated with WMI, but not fully
+ * closes WMI service.
+ *
+ * Return: VOS_STATUS_SUCCESS if work close is successful. Otherwise
+ *         proper error codes.
+ */
+VOS_STATUS wma_wmi_work_close(v_VOID_t *vos_ctx)
+{
+	tp_wma_handle wma_handle;
+
+	WMA_LOGD("%s: Enter", __func__);
+
+	wma_handle = vos_get_context(VOS_MODULE_ID_WDA, vos_ctx);
+
+	/* validate the wma_handle */
+	if (NULL == wma_handle) {
+		WMA_LOGE("%s: Invalid wma handle", __func__);
+		return VOS_STATUS_E_INVAL;
+	}
+
+	/* validate the wmi handle */
+	if (NULL == wma_handle->wmi_handle) {
+		WMA_LOGE("%s: Invalid wmi handle", __func__);
+		return VOS_STATUS_E_INVAL;
+	}
+
+	/* remove the wmi work */
+	WMA_LOGD("calling wmi_unified_remove_work");
+	wmi_unified_remove_work(wma_handle->wmi_handle);
+
 	return VOS_STATUS_SUCCESS;
 }
 
