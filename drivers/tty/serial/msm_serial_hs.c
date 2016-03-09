@@ -2485,11 +2485,7 @@ static int msm_hs_startup(struct uart_port *uport)
 		}
 	}
 
-	if (!tty->name)
-		wakeup_source_init(&msm_uport->ws, "msm-bt-uart");
-	else
-		wakeup_source_init(&msm_uport->ws, tty->name);
-
+	wakeup_source_init(&msm_uport->ws, tty->name);
 	ret = msm_hs_config_uart_gpios(uport);
 	if (ret) {
 		MSM_HS_ERR("Uart GPIO request failed\n");

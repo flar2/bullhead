@@ -77,6 +77,10 @@
  *  when HDD queue becomes full. This Low watermark is used to enable
  *  the Net Device queue again */
 #define HDD_TX_QUEUE_LOW_WATER_MARK (HDD_TX_QUEUE_MAX_LEN*3/4)
+
+/** Length of the TX queue for the netdev */
+#define HDD_NETDEV_TX_QUEUE_LEN (3000)
+
 /** Bytes to reserve in the headroom */
 #define LIBRA_HW_NEEDED_HEADROOM   128
 /** Hdd Tx Time out value */
@@ -1379,6 +1383,8 @@ struct hdd_context_s
     spinlock_t     bus_bw_lock;
     int            cur_rx_level;
     uint64_t       prev_rx;
+    int            cur_tx_level;
+    uint64_t       prev_tx;
 #endif
 
     v_U8_t         issplitscan_enabled;
@@ -1557,6 +1563,7 @@ void wlan_hdd_reset_prob_rspies(hdd_adapter_t* pHostapdAdapter);
 void hdd_prevent_suspend(uint32_t reason);
 void hdd_allow_suspend(uint32_t reason);
 void hdd_prevent_suspend_timeout(v_U32_t timeout, uint32_t reason);
+void hdd_allow_runtime_suspend(void);
 bool hdd_is_ssr_required(void);
 void hdd_set_ssr_required(e_hdd_ssr_required value);
 
