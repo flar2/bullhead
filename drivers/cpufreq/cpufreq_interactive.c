@@ -498,9 +498,9 @@ static void cpufreq_interactive_timer(unsigned long data)
 				new_freq = tunables->hispeed_freq;
 		}
 	} else {
-		new_freq = choose_freq(pcpu, loadadjfreq);
+		new_freq = choose_freq(ppol, loadadjfreq);
 		if (new_freq > tunables->hispeed_freq &&
-				pcpu->target_freq < tunables->hispeed_freq)
+				ppol->target_freq < tunables->hispeed_freq)
 			new_freq = tunables->hispeed_freq;
 	}
 
