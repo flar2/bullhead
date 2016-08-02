@@ -9999,6 +9999,7 @@ static int hdd_set_reset_bpf_offload(hdd_context_t *hdd_ctx,
 	struct sir_bpf_set_offload *bpf_set_offload;
 	eHalStatus hstatus;
 	int prog_len;
+	int ret_val = -EINVAL;
 
 	ENTER();
 
@@ -10038,6 +10039,11 @@ static int hdd_set_reset_bpf_offload(hdd_context_t *hdd_ctx,
 
 	prog_len = nla_len(tb[BPF_PROGRAM]);
 	bpf_set_offload->program = vos_mem_malloc(sizeof(uint8_t) * prog_len);
+	if (!bpf_set_offload->program) {
+		hddLog(LOGE, FL("failed to allocate memory for bpf filter"));
+		ret_val = -ENOMEM;
+		goto fail;
+	}
 	bpf_set_offload->current_length = prog_len;
 	nla_memcpy(bpf_set_offload->program, tb[BPF_PROGRAM], prog_len);
 	bpf_set_offload->session_id = adapter->sessionId;
@@ -10081,7 +10087,7 @@ fail:
 	if (bpf_set_offload->current_length)
 		vos_mem_free(bpf_set_offload->program);
 	vos_mem_free(bpf_set_offload);
-	return -EINVAL;
+	return ret_val;
 }
 
 /**
@@ -17213,6 +17219,22 @@ int wlan_hdd_cfg80211_connect_start( hdd_adapter_t  *pAdapter,
             pRoamProfile->vht_channel_width = ch_width;
         }
         /*
+         * if MFPEnabled is set but the peer AP is non-PMF i.e ieee80211w=2
+         * or pmf=2 is an explicit configuration in the supplicant
+         * configuration, drop the connection request.
+         */
+         if (pWextState->roamProfile.MFPEnabled &&
+            !(pWextState->roamProfile.MFPRequired ||
+            pWextState->roamProfile.MFPCapable)) {
+             hddLog(LOGE,
+                FL("Drop connect req as supplicant has indicated PMF required for the non-PMF peer."
+                   " MFPEnabled %d MFPRequired %d MFPCapable %d"),
+                pWextState->roamProfile.MFPEnabled,
+                pWextState->roamProfile.MFPRequired,
+                pWextState->roamProfile.MFPCapable);
+             return -EINVAL;
+        }
+        /*
          * Change conn_state to connecting before sme_RoamConnect(),
          * because sme_RoamConnect() has a direct path to call
          * hdd_smeRoamCallback(), which will change the conn_state
@@ -22716,18 +22738,6 @@ int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
         if (sme_staInMiddleOfRoaming(pHddCtx->hHal, pAdapter->sessionId)) {
             hddLog(LOG1, FL("Roaming in progress, do not allow suspend"));
             return -EAGAIN;
-        }
-
-        if (pHddCtx->cfg_ini->enablePowersaveOffload &&
-            pHddCtx->cfg_ini->fIsBmpsEnabled &&
-            ((WLAN_HDD_INFRA_STATION == pAdapter->device_mode) ||
-            (WLAN_HDD_P2P_CLIENT == pAdapter->device_mode))) {
-            if (!sme_PsOffloadIsStaInPowerSave(pHddCtx->hHal,
-                                               pAdapter->sessionId)) {
-                hddLog(VOS_TRACE_LEVEL_DEBUG,
-                  FL("STA is not in power save, Do not allow suspend"));
-                return -EAGAIN;
-            }
         }
 
         if (pScanInfo->mScanPending && pAdapter->request)
