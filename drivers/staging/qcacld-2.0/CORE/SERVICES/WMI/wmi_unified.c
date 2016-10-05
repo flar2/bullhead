@@ -794,7 +794,15 @@ dont_tag:
 		pr_err("%s: WMI Pending cmds: %d reached MAX: %d\n",
 			__func__, adf_os_atomic_read(&wmi_handle->pending_cmds), WMI_MAX_CMDS);
 		adf_os_atomic_dec(&wmi_handle->pending_cmds);
-		VOS_BUG(0);
+		if (scn && scn->enable_self_recovery) {
+			if (vos_is_logp_in_progress(VOS_MODULE_ID_VOSS, NULL)) {
+				pr_err("%s- %d: SSR is in progress!!!!\n",
+					 __func__, __LINE__);
+				return -EBUSY;
+			}
+			vos_trigger_recovery(true);
+		} else
+			VOS_BUG(0);
 		return -EBUSY;
 	}
 

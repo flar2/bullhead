@@ -21549,7 +21549,7 @@ int wma_enable_wow_in_fw(WMA_HANDLE handle, int runtime_pm)
 		if (!vos_is_logp_in_progress(VOS_MODULE_ID_VOSS, NULL)) {
 #ifdef CONFIG_CNSS
 			if (pMac->sme.enableSelfRecovery) {
-				vos_trigger_recovery();
+				vos_trigger_recovery(false);
 			} else {
 				VOS_BUG(0);
 			}
@@ -22574,7 +22574,7 @@ static VOS_STATUS wma_send_host_wakeup_ind_to_fw(tp_wma_handle wma)
 #ifdef CONFIG_CNSS
 			if (pMac->sme.enableSelfRecovery) {
 				wmi_tag_crash_inject(wma->wmi_handle, true);
-				vos_trigger_recovery();
+				vos_trigger_recovery(false);
 			} else {
 				VOS_BUG(0);
 			}
@@ -22641,7 +22641,7 @@ VOS_STATUS wma_disable_d0wow_in_fw(tp_wma_handle wma)
 		} else {
 #ifdef CONFIG_CNSS
 			if (pmac->sme.enableSelfRecovery) {
-				vos_trigger_recovery();
+				vos_trigger_recovery(false);
 			} else {
 				VOS_BUG(0);
 			}
@@ -22673,7 +22673,7 @@ VOS_STATUS wma_disable_d0wow_in_fw(tp_wma_handle wma)
 		} else {
 #ifdef CONFIG_CNSS
 			if (pmac->sme.enableSelfRecovery) {
-				vos_trigger_recovery();
+				vos_trigger_recovery(false);
 			} else {
 				VOS_BUG(0);
 			}
@@ -33608,7 +33608,7 @@ int wma_suspend_target(WMA_HANDLE handle, int disable_target_intr)
 				 __func__);
 		} else {
 			if (pmac->sme.enableSelfRecovery) {
-				vos_trigger_recovery();
+				vos_trigger_recovery(false);
 			} else {
 				VOS_BUG(0);
 			}
@@ -33643,8 +33643,9 @@ void wma_target_suspend_acknowledge(void *context)
 
 	wma->wow_nack = wow_nack;
 	vos_event_set(&wma->target_suspend);
-	if (wow_nack)
-		vos_wake_lock_timeout_acquire(&wma->wow_wake_lock, WMA_WAKE_LOCK_TIMEOUT,
+	if (wow_nack && !wmi_get_runtime_pm_inprogress(wma->wmi_handle))
+		vos_wake_lock_timeout_acquire(&wma->wow_wake_lock,
+					      WMA_WAKE_LOCK_TIMEOUT,
 					      WIFI_POWER_EVENT_WAKELOCK_WOW);
 }
 
