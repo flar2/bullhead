@@ -712,7 +712,7 @@ void send_flush_completion_to_user(void)
 
 	wlan_report_log_completion(is_fatal, indicator, reason_code);
 	if (is_ssr_needed)
-		vos_wlanRestart();
+		vos_trigger_recovery(false);
 }
 
 /**
@@ -830,6 +830,13 @@ static int wlan_logging_proc_sock_rx_msg(struct sk_buff *skb)
 		LOGGING_TRACE(VOS_TRACE_LEVEL_ERROR,
 				"%s: invalid radio id [%d]\n",
 				__func__, radio);
+		return -EINVAL;
+	}
+
+	if (wnl->wmsg.length > skb->data_len) {
+		LOGGING_TRACE(VOS_TRACE_LEVEL_ERROR,
+			"%s: invalid length msgLen:%x skb data_len:%x\n",
+			__func__, wnl->wmsg.length, skb->data_len);
 		return -EINVAL;
 	}
 

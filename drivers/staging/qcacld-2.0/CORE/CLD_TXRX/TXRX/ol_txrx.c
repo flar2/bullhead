@@ -72,6 +72,28 @@
 
 /*=== function definitions ===*/
 
+/**
+ * ol_tx_mark_first_wakeup_packet() - set flag to indicate that
+ *    fw is compatible for marking first packet after wow wakeup
+ * @value: 1 for enabled/ 0 for disabled
+ *
+ * Return: None
+ */
+void ol_tx_mark_first_wakeup_packet(uint8_t value)
+{
+	void *vos_context = vos_get_global_context(VOS_MODULE_ID_TXRX, NULL);
+	struct ol_txrx_pdev_t *pdev = vos_get_context(VOS_MODULE_ID_TXRX,
+						vos_context);
+
+	if (!pdev) {
+		TXRX_PRINT(TXRX_PRINT_LEVEL_ERR,
+			"%s: pdev is NULL\n", __func__);
+		return;
+	}
+
+	htt_mark_first_wakeup_packet(pdev->htt_pdev, value);
+}
+
 u_int16_t
 ol_tx_desc_pool_size_hl(ol_pdev_handle ctrl_pdev)
 {
@@ -1895,6 +1917,31 @@ ol_txrx_get_tx_pending(ol_txrx_pdev_handle pdev_handle)
     return (total - pdev->tx_desc.num_free);
 }
 
+/*
+ * ol_txrx_get_queue_status() - get vdev tx ll queues status
+ * pdev_handle: pdev handle
+ *
+ * Return: A_OK - if all queues are empty
+ *         A_ERROR - if any queue is not empty
+ */
+A_STATUS
+ol_txrx_get_queue_status(ol_txrx_pdev_handle pdev_handle)
+{
+	struct ol_txrx_pdev_t *pdev = (ol_txrx_pdev_handle)pdev_handle;
+	struct ol_txrx_vdev_t *vdev;
+	A_STATUS status = A_OK;
+
+	TAILQ_FOREACH(vdev, &pdev->vdev_list, vdev_list_elem) {
+		if ((vdev->ll_pause.paused_reason & OL_TXQ_PAUSE_REASON_FW) &&
+			 vdev->ll_pause.txq.depth) {
+			status = A_ERROR;
+			break;
+		}
+	}
+
+	return status;
+}
+
 void
 ol_txrx_discard_tx_pending(ol_txrx_pdev_handle pdev_handle)
 {
@@ -2706,6 +2753,9 @@ void ol_txrx_display_stats(struct ol_txrx_pdev_t *pdev, uint16_t value)
         case WLAN_TXRX_STATS:
             ol_txrx_stats_display(pdev);
             break;
+        case WLAN_TXRX_DESC_STATS:
+            adf_nbuf_tx_desc_count_display();
+            break;
 #ifdef CONFIG_HL_SUPPORT
         case WLAN_SCHEDULER_STATS:
             ol_tx_sched_cur_state_display(pdev);
@@ -2740,6 +2790,9 @@ void ol_txrx_clear_stats(struct ol_txrx_pdev_t *pdev, uint16_t value)
     {
         case WLAN_TXRX_STATS:
             ol_txrx_stats_clear(pdev);
+            break;
+        case WLAN_TXRX_DESC_STATS:
+            adf_nbuf_tx_desc_count_clear();
             break;
 #ifdef CONFIG_HL_SUPPORT
         case WLAN_SCHEDULER_STATS:

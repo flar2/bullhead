@@ -4587,11 +4587,11 @@ static int hdd_set_rx_filter(hdd_adapter_t *adapter, bool action,
 		vos_mem_zero(filter, sizeof(*filter));
 		filter->action = action;
 		for (i = 0, j = 0; i < adapter->mc_addr_list.mc_cnt; i++) {
-			if (!memcmp(adapter->mc_addr_list.addr[i],
+			if (!memcmp(&adapter->mc_addr_list.addr[i * ETH_ALEN],
 				&pattern, 1)) {
 				memcpy(filter->multicastAddr[j],
-					adapter->mc_addr_list.addr[i],
-					sizeof(adapter->mc_addr_list.addr[i]));
+				    &adapter->mc_addr_list.addr[i * ETH_ALEN],
+				    ETH_ALEN);
 				hddLog(LOG1, "%s RX filter : addr ="
 				    MAC_ADDRESS_STR,
 				    action ? "setting" : "clearing",
@@ -8064,8 +8064,8 @@ static void hdd_update_tgt_services(hdd_context_t *hdd_ctx,
                     cfg->per_band_chainmask_supp);
 #ifdef FEATURE_WLAN_TDLS
     cfg_ini->fEnableTDLSSupport &= cfg->en_tdls;
-    cfg_ini->fEnableTDLSOffChannel &= cfg->en_tdls_offchan;
-    cfg_ini->fEnableTDLSBufferSta &= cfg->en_tdls_uapsd_buf_sta;
+    cfg_ini->fEnableTDLSOffChannel &= (uint32_t)cfg->en_tdls_offchan;
+    cfg_ini->fEnableTDLSBufferSta &= (uint32_t)cfg->en_tdls_uapsd_buf_sta;
     if (cfg_ini->fTDLSUapsdMask && cfg->en_tdls_uapsd_sleep_sta)
     {
         cfg_ini->fEnableTDLSSleepSta = TRUE;
@@ -8760,6 +8760,8 @@ void hdd_update_tgt_cfg(void *context, void *param)
 
     /* Configure NAN datapath features */
     hdd_nan_datapath_target_config(hdd_ctx, cfg);
+
+    hdd_ctx->max_mc_addr_list = cfg->max_mc_addr_list;
 }
 
 /* This function is invoked in atomic context when a radar
@@ -9760,7 +9762,8 @@ static void __hdd_set_multicast_list(struct net_device *dev)
       return;
 
    /* Delete already configured multicast address list */
-   wlan_hdd_set_mc_addr_list(pAdapter, false);
+   if (0 < pAdapter->mc_addr_list.mc_cnt)
+      wlan_hdd_set_mc_addr_list(pAdapter, false);
 
    if (dev->flags & IFF_ALLMULTI)
    {
@@ -9773,17 +9776,20 @@ static void __hdd_set_multicast_list(struct net_device *dev)
       mc_count = netdev_mc_count(dev);
       hddLog(VOS_TRACE_LEVEL_INFO,
             "%s: mc_count = %u", __func__, mc_count);
-      if (mc_count > WLAN_HDD_MAX_MC_ADDR_LIST)
-      {
+
+      if (mc_count > pHddCtx->max_mc_addr_list) {
          hddLog(VOS_TRACE_LEVEL_INFO,
-               "%s: No free filter available; allow all multicast frames", __func__);
+                "%s: No free filter available; allow all multicast frames",
+                __func__);
          pAdapter->mc_addr_list.mc_cnt = 0;
          return;
       }
 
-      pAdapter->mc_addr_list.mc_cnt = mc_count;
-
       netdev_for_each_mc_addr(ha, dev) {
+         hddLog(VOS_TRACE_LEVEL_INFO,
+                FL("ha_addr[%d] "MAC_ADDRESS_STR),
+                i, MAC_ADDR_ARRAY(ha->addr));
+
          if (i == mc_count)
             break;
          /*
@@ -9798,14 +9804,16 @@ static void __hdd_set_multicast_list(struct net_device *dev)
                 hddLog(LOG1, FL("MC/BC filtering Skip addr ="MAC_ADDRESS_STR),
                      MAC_ADDR_ARRAY(ha->addr));
 
-                pAdapter->mc_addr_list.mc_cnt--;
                 continue;
          }
-         memset(&(pAdapter->mc_addr_list.addr[i][0]), 0, ETH_ALEN);
-         memcpy(&(pAdapter->mc_addr_list.addr[i][0]), ha->addr, ETH_ALEN);
+
+         memset(&(pAdapter->mc_addr_list.addr[i * ETH_ALEN]), 0, ETH_ALEN);
+         memcpy(&(pAdapter->mc_addr_list.addr[i * ETH_ALEN]),
+                ha->addr, ETH_ALEN);
          hddLog(VOS_TRACE_LEVEL_INFO, "%s: mlist[%d] = "MAC_ADDRESS_STR,
                __func__, i,
-               MAC_ADDR_ARRAY(pAdapter->mc_addr_list.addr[i]));
+               MAC_ADDR_ARRAY(&pAdapter->mc_addr_list.addr[i * ETH_ALEN]));
+         pAdapter->mc_addr_list.mc_cnt++;
          i++;
       }
    }
@@ -10789,7 +10797,10 @@ hdd_adapter_t* hdd_open_adapter( hdd_context_t *pHddCtx, tANI_U8 session_type,
             hddLog(VOS_TRACE_LEVEL_FATAL,
                    FL("failed to allocate adapter for session %d"), session_type);
             return NULL;
-          }
+         }
+
+         if (0 != hdd_init_packet_filtering(pHddCtx, pAdapter))
+            goto err_free_netdev;
 
          if (session_type == WLAN_HDD_P2P_CLIENT)
             pAdapter->wdev.iftype = NL80211_IFTYPE_P2P_CLIENT;
@@ -10860,6 +10871,9 @@ hdd_adapter_t* hdd_open_adapter( hdd_context_t *pHddCtx, tANI_U8 session_type,
                    FL("failed to allocate adapter for session %d"), session_type);
             return NULL;
          }
+
+         if (0 != hdd_init_packet_filtering(pHddCtx, pAdapter))
+            goto err_free_netdev;
 
          pAdapter->wdev.iftype = (session_type == WLAN_HDD_SOFTAP) ?
                                   NL80211_IFTYPE_AP:
@@ -10945,6 +10959,7 @@ hdd_adapter_t* hdd_open_adapter( hdd_context_t *pHddCtx, tANI_U8 session_type,
    {
       if( NULL != pAdapter )
       {
+         hdd_deinit_packet_filtering(pAdapter);
          hdd_cleanup_adapter( pHddCtx, pAdapter, rtnl_held );
          pAdapter = NULL;
       }
@@ -11188,8 +11203,8 @@ VOS_STATUS hdd_close_adapter( hdd_context_t *pHddCtx, hdd_adapter_t *pAdapter,
    if( VOS_STATUS_SUCCESS == status )
    {
       wlan_hdd_clear_concurrency_mode(pHddCtx, pAdapter->device_mode);
+      hdd_deinit_packet_filtering(pAdapterNode->pAdapter);
       hdd_cleanup_adapter( pHddCtx, pAdapterNode->pAdapter, rtnl_held );
-
       hdd_remove_adapter( pHddCtx, pAdapterNode );
       vos_mem_free( pAdapterNode );
       pAdapterNode = NULL;
@@ -11235,6 +11250,7 @@ VOS_STATUS hdd_close_all_adapters( hdd_context_t *pHddCtx )
       status = hdd_remove_front_adapter( pHddCtx, &pHddAdapterNode );
       if( pHddAdapterNode && VOS_STATUS_SUCCESS == status )
       {
+         hdd_deinit_packet_filtering(pHddAdapterNode->pAdapter);
          hdd_cleanup_adapter( pHddCtx, pHddAdapterNode->pAdapter, FALSE );
          vos_mem_free( pHddAdapterNode );
       }
@@ -11356,8 +11372,7 @@ VOS_STATUS hdd_stop_adapter( hdd_context_t *pHddCtx, hdd_adapter_t *pAdapter,
          }
          else
          {
-            hdd_abort_mac_scan(pHddCtx, pAdapter->sessionId,
-                               eCSR_SCAN_ABORT_DEFAULT);
+            wlan_hdd_scan_abort(pAdapter);
          }
          if ((pAdapter->device_mode == WLAN_HDD_P2P_CLIENT) ||
               (pAdapter->device_mode == WLAN_HDD_P2P_DEVICE)) {
@@ -12857,10 +12872,8 @@ void hdd_wlan_exit(hdd_context_t *pHddCtx)
          "%s: Failed to close VOSS Scheduler",__func__);
       VOS_ASSERT( VOS_IS_STATUS_SUCCESS( vosStatus ) );
    }
-#ifdef WLAN_FEATURE_HOLD_RX_WAKELOCK
    /* Destroy the wake lock */
    vos_wake_lock_destroy(&pHddCtx->rx_wake_lock);
-#endif
    /* Destroy the wake lock */
    vos_wake_lock_destroy(&pHddCtx->sap_wake_lock);
 
@@ -14400,7 +14413,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
       if(!VOS_IS_STATUS_SUCCESS( status ))
       {
          hddLog(VOS_TRACE_LEVEL_FATAL,"%s: vos_watchdog_open failed",__func__);
-         goto err_wdclose;
+         goto err_nl_srv;
       }
    }
 
@@ -14622,7 +14635,9 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
    }
 
 #ifdef QCA_PKT_PROTO_TRACE
-   vos_pkt_proto_trace_init();
+   /* Ensure pkt tracing happen only in Non FTM mode */
+   if (VOS_FTM_MODE != hdd_get_conparam())
+       vos_pkt_proto_trace_init();
 #endif /* QCA_PKT_PROTO_TRACE */
 
  ftm_processing:
@@ -14631,7 +14646,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
       if ( VOS_STATUS_SUCCESS != wlan_hdd_ftm_open(pHddCtx) )
       {
           hddLog(VOS_TRACE_LEVEL_FATAL,"%s: wlan_hdd_ftm_open Failed",__func__);
-          goto err_config;
+          goto err_nl_srv;
       }
 #if  defined(QCA_WIFI_FTM)
       if (hdd_ftm_start(pHddCtx))
@@ -14853,7 +14868,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
    if(btc_activate_service(pHddCtx) != 0)
    {
       hddLog(VOS_TRACE_LEVEL_FATAL,"%s: btc_activate_service failed",__func__);
-      goto err_nl_srv;
+      goto err_reg_netdev;
    }
 
 #ifdef FEATURE_OEM_DATA_SUPPORT
@@ -14862,7 +14877,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
    {
       hddLog(VOS_TRACE_LEVEL_FATAL,
              "%s: oem_activate_service failed", __func__);
-      goto err_nl_srv;
+      goto err_reg_netdev;
    }
 #endif
 
@@ -14871,7 +14886,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
    if(ptt_sock_activate_svc(pHddCtx) != 0)
    {
       hddLog(VOS_TRACE_LEVEL_FATAL,"%s: ptt_sock_activate_svc failed",__func__);
-      goto err_nl_srv;
+      goto err_reg_netdev;
    }
 #endif
 
@@ -14886,7 +14901,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
    {
       hddLog(VOS_TRACE_LEVEL_FATAL,
              "%s: cnss_diag_activate_service failed", __func__);
-      goto err_nl_srv;
+      goto err_close_cesium;
    }
 
    hdd_register_mcast_bcast_filter(pHddCtx);
@@ -14910,16 +14925,14 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
    if (ret < 0) {
       hddLog(VOS_TRACE_LEVEL_ERROR,"%s: register_netdevice_notifier failed",
             __func__);
-      goto err_nl_srv;
+      goto err_close_cesium;
    }
    reg_netdev_notifier_done = TRUE;
 #endif
 
-#ifdef WLAN_FEATURE_HOLD_RX_WAKELOCK
    /* Initialize the wake lcok */
    vos_wake_lock_init(&pHddCtx->rx_wake_lock,
            "qcom_rx_wakelock");
-#endif
    /* Initialize the wake lcok */
    vos_wake_lock_init(&pHddCtx->sap_wake_lock,
            "qcom_sap_wakelock");
@@ -15016,7 +15029,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
                  "%s: Memory allocation for TxPowerLimit "
                  "failed!", __func__);
-       goto err_nl_srv;
+       goto err_close_cesium;
    }
    hddtxlimit->txPower2g = pHddCtx->cfg_ini->TxPower2g;
    hddtxlimit->txPower5g = pHddCtx->cfg_ini->TxPower5g;
@@ -15118,13 +15131,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
    complete(&wlan_start_comp);
    goto success;
 
-err_nl_srv:
-#ifdef WLAN_KD_READY_NOTIFIER
-   nl_srv_exit(pHddCtx->ptt_pid);
-#else
-   nl_srv_exit();
-#endif /* WLAN_KD_READY_NOTIFIER */
-
+err_close_cesium:
    hdd_close_cesium_nl_sock();
 
 err_reg_netdev:
@@ -15148,8 +15155,6 @@ err_unregister_pmops:
 
    hdd_debugfs_exit(pHddCtx);
 
-
-
 err_close_adapter:
 #if defined(CONFIG_HDD_INIT_WITH_RTNL_LOCK)
    if (rtnl_lock_enable == TRUE) {
@@ -15158,6 +15163,11 @@ err_close_adapter:
    }
 #endif
    hdd_close_all_adapters( pHddCtx );
+
+#ifdef QCA_PKT_PROTO_TRACE
+   if (VOS_FTM_MODE != hdd_get_conparam())
+       vos_pkt_proto_trace_close();
+#endif /* QCA_PKT_PROTO_TRACE */
 
 err_vosstop:
    vos_stop(pVosContext);
@@ -15200,6 +15210,12 @@ err_free_ftm_open:
 
    if (VOS_FTM_MODE != hdd_get_conparam())
        wlan_hdd_logging_sock_deactivate_svc(pHddCtx);
+err_nl_srv:
+#ifdef WLAN_KD_READY_NOTIFIER
+   nl_srv_exit(pHddCtx->ptt_pid);
+#else
+   nl_srv_exit();
+#endif /* WLAN_KD_READY_NOTIFIER */
 
 err_config:
    kfree(pHddCtx->cfg_ini);
@@ -15474,9 +15490,6 @@ static void hdd_driver_exit(void)
 
       pHddCtx->driver_being_stopped = false;
 
-#ifdef QCA_PKT_PROTO_TRACE
-      vos_pkt_proto_trace_close();
-#endif /* QCA_PKT_PROTO_TRACE */
       while(pHddCtx->isLogpInProgress ||
             vos_is_logp_in_progress(VOS_MODULE_ID_VOSS, NULL)) {
          VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_FATAL,
@@ -15498,10 +15511,13 @@ static void hdd_driver_exit(void)
    }
 
    vos_wait_for_work_thread_completion(__func__);
-
    hif_unregister_driver();
-
    vos_preClose( &pVosContext );
+
+#ifdef QCA_PKT_PROTO_TRACE
+   if (VOS_FTM_MODE != hdd_get_conparam())
+       vos_pkt_proto_trace_close();
+#endif /* QCA_PKT_PROTO_TRACE */
 
 #ifdef TIMER_MANAGER
    vos_timer_exit();
@@ -17501,6 +17517,44 @@ int hdd_enable_disable_ca_event(hdd_context_t *hddctx, tANI_U8 set_value)
 exit:
 	return ret_val;
 }
+
+#ifdef WLAN_FEATURE_PACKET_FILTERING
+/**
+ * hdd_init_packet_filtering - allocate packet filter MC address list
+ * @hdd_ctx: pointer to hdd context
+ * @adapter: pointer to hdd_adapter_t
+ *
+ * This function allocates memory for link layer MC address list which will
+ * be communicated to firmware for packet filtering in HOST suspend state.
+ *
+ * Return: 0 on success, error number otherwise.
+ */
+int hdd_init_packet_filtering(hdd_context_t *hdd_ctx,
+					hdd_adapter_t *adapter)
+{
+	adapter->mc_addr_list.addr =
+			vos_mem_malloc(hdd_ctx->max_mc_addr_list * ETH_ALEN);
+
+	if (NULL == adapter->mc_addr_list.addr) {
+		hddLog(LOGE, FL("Could not allocate Memory"));
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+/**
+ * hdd_deinit_packet_filtering - deallocate packet filter MC address list
+ * @adapter: pointer to hdd_adapter_t
+ *
+ * Return: none
+ */
+void hdd_deinit_packet_filtering(hdd_adapter_t *adapter)
+{
+	vos_mem_free(adapter->mc_addr_list.addr);
+	adapter->mc_addr_list.addr = NULL;
+}
+#endif
 
 //Register the module init/exit functions
 module_init(hdd_module_init);

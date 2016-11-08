@@ -71,6 +71,7 @@ enum wlan_op_mode {
 #define WLAN_HDD_STATS               0
 #define WLAN_TXRX_STATS              1
 #define WLAN_TXRX_HIST_STATS         2
+#define WLAN_TXRX_DESC_STATS         3
 #ifdef CONFIG_HL_SUPPORT
 #define WLAN_SCHEDULER_STATS        21
 #define WLAN_TX_QUEUE_STATS         22
@@ -726,6 +727,19 @@ ol_txrx_set_curchan(
 int
 ol_txrx_get_tx_pending(
     ol_txrx_pdev_handle pdev);
+
+/**
+ * ol_txrx_get_queue_status() - Get the status of tx queues.
+ * @pdev: the data physical device object
+ *
+ * This api is used while trying to go in suspend mode.
+ *
+ * Return - status: A_OK - if all queues are empty
+ *                  A_ERROR - if any queue is not empty
+ */
+A_STATUS
+ol_txrx_get_queue_status(
+	ol_txrx_pdev_handle pdev);
 
 void ol_txrx_dump_tx_desc(ol_txrx_pdev_handle pdev);
 
@@ -1401,5 +1415,6 @@ void ol_txrx_clear_stats(struct ol_txrx_pdev_t *pdev, uint16_t bitmap);
 void ol_rx_reset_pn_replay_counter(struct ol_txrx_pdev_t *pdev);
 uint32_t ol_rx_get_tkip_replay_counter(struct ol_txrx_pdev_t *pdev);
 uint32_t ol_rx_get_ccmp_replay_counter(struct ol_txrx_pdev_t *pdev);
+void ol_tx_mark_first_wakeup_packet(uint8_t value);
 
 #endif /* _OL_TXRX_CTRL_API__H_ */

@@ -4554,6 +4554,20 @@ REG_TABLE_ENTRY g_registry_table[] =
                 CFG_EDCA_BE_AIFS_VALUE_DEFAULT,
                 CFG_EDCA_BE_AIFS_VALUE_MIN,
                 CFG_EDCA_BE_AIFS_VALUE_MAX),
+
+   REG_VARIABLE(CFG_RX_WAKELOCK_TIMEOUT_NAME, WLAN_PARAM_Integer,
+                hdd_config_t, rx_wakelock_timeout,
+                VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+                CFG_RX_WAKELOCK_TIMEOUT_DEFAULT,
+                CFG_RX_WAKELOCK_TIMEOUT_MIN,
+                CFG_RX_WAKELOCK_TIMEOUT_MAX),
+
+   REG_VARIABLE(CFG_ACTIVE_MODE_OFFLOAD, WLAN_PARAM_Integer,
+                hdd_config_t, active_mode_offload,
+                VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+                CFG_ACTIVE_MODE_OFFLOAD_DEFAULT,
+                CFG_ACTIVE_MODE_OFFLOAD_MIN,
+                CFG_ACTIVE_MODE_OFFLOAD_MAX),
 };
 
 
@@ -5356,7 +5370,9 @@ void print_hdd_cfg(hdd_context_t *pHddCtx)
   hddLog(LOG2, "Name = [%s] Value = [%u]",
           CFG_EDCA_BE_AIFS_VALUE_NAME,
           pHddCtx->cfg_ini->edca_be_aifs);
-
+  hddLog(LOG2, "Name = [%s] Value = [%u]",
+                 CFG_ACTIVE_MODE_OFFLOAD,
+                 pHddCtx->cfg_ini->active_mode_offload);
   hdd_ndp_print_ini_config(pHddCtx);
 }
 
@@ -6199,7 +6215,7 @@ VOS_STATUS hdd_hex_string_to_u16_array(char *str,
 		uint16_t *int_array, uint8_t *len, uint8_t int_array_max_len)
 {
 	char *s = str;
-	int val = 0;
+	uint32_t val = 0;
 	if (str == NULL || int_array == NULL || len == NULL)
 		return VOS_STATUS_E_INVAL;
 

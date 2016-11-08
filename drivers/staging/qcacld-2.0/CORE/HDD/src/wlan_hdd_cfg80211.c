@@ -6621,7 +6621,8 @@ void wlan_hdd_clear_link_layer_stats(hdd_adapter_t *adapter)
 	tSirLLStatsClearReq link_layer_stats_clear_req;
 	tHalHandle hal = WLAN_HDD_GET_HAL_CTX(adapter);
 
-	link_layer_stats_clear_req.statsClearReqMask = WIFI_STATS_IFACE_AC;
+	link_layer_stats_clear_req.statsClearReqMask = WIFI_STATS_IFACE_AC |
+		WIFI_STATS_IFACE_ALL_PEER;
 	link_layer_stats_clear_req.stopReq = 0;
 	link_layer_stats_clear_req.reqId = 1;
 	link_layer_stats_clear_req.staId = adapter->sessionId;
@@ -9029,18 +9030,24 @@ static int __wlan_hdd_cfg80211_wifi_logger_get_ring_data(struct wiphy *wiphy,
 	if (ring_id == RING_ID_PER_PACKET_STATS) {
 		wlan_logging_set_per_pkt_stats();
 		hddLog(LOG1, FL("Flushing/Retrieving packet stats"));
-	}
+	} else if (ring_id == RING_ID_DRIVER_DEBUG) {
+		/*
+		 * As part of DRIVER ring ID, flush both driver and fw logs.
+		 * For other Ring ID's driver doesn't have any rings to flush
+		 */
+		hddLog(LOG1, FL("Bug report triggered by framework"));
 
-	hddLog(LOG1, FL("Bug report triggered by framework"));
-
-	ret = vos_flush_logs(WLAN_LOG_TYPE_NON_FATAL,
-			     WLAN_LOG_INDICATOR_FRAMEWORK,
-			     WLAN_LOG_REASON_CODE_UNUSED,
-			     true);
-	if (VOS_STATUS_SUCCESS != ret) {
-		hddLog(LOGE, FL("Failed to trigger bug report"));
-		return -EINVAL;
-	}
+		ret = vos_flush_logs(WLAN_LOG_TYPE_NON_FATAL,
+				     WLAN_LOG_INDICATOR_FRAMEWORK,
+				     WLAN_LOG_REASON_CODE_UNUSED,
+				     DUMP_VOS_TRACE | DUMP_PACKET_TRACE);
+		if (VOS_STATUS_SUCCESS != ret) {
+			hddLog(LOGE, FL("Failed to trigger bug report"));
+			return -EINVAL;
+		}
+	} else
+		wlan_report_log_completion(0, WLAN_LOG_INDICATOR_FRAMEWORK,
+					   WLAN_LOG_REASON_CODE_UNUSED);
 
 	return 0;
 }
@@ -9700,6 +9707,8 @@ __wlan_hdd_cfg80211_set_ns_offload(struct wiphy *wiphy,
 	int status;
 	struct nlattr *tb[QCA_WLAN_VENDOR_ATTR_ND_OFFLOAD_MAX + 1];
 	hdd_context_t *pHddCtx = wiphy_priv(wiphy);
+	struct net_device *dev = wdev->netdev;
+	hdd_adapter_t *pAdapter =  WLAN_HDD_GET_PRIV_PTR(dev);
 
 	ENTER();
 
@@ -9725,6 +9734,17 @@ __wlan_hdd_cfg80211_set_ns_offload(struct wiphy *wiphy,
 
 	pHddCtx->ns_offload_enable =
 		nla_get_u8(tb[QCA_WLAN_VENDOR_ATTR_ND_OFFLOAD_FLAG]);
+
+	/*
+         * If active mode offload is enabled configure the nsoffload
+         * enable/disable request from the upper layer.
+         */
+	if (pHddCtx->cfg_ini->active_mode_offload) {
+		hddLog(LOG1,
+			FL("Configure NS offload with command: %d"),
+			pHddCtx->ns_offload_enable);
+		hdd_conf_ns_offload(pAdapter, pHddCtx->ns_offload_enable);
+	}
 
 	return 0;
 }
@@ -10327,6 +10347,7 @@ static uint32_t hdd_send_wakelock_stats(hdd_context_t *hdd_ctx,
 	uint32_t nl_buf_len;
 	uint32_t total_rx_data_wake, rx_multicast_cnt;
 	uint32_t ipv6_rx_multicast_addr_cnt;
+	uint32_t icmpv6_cnt;
 
 	ENTER();
 
@@ -10356,12 +10377,14 @@ static uint32_t hdd_send_wakelock_stats(hdd_context_t *hdd_ctx,
 			data->wow_ipv6_mcast_ns_stats);
 	hddLog(LOG1, "wow_ipv6_mcast_na_stats %d",
 			data->wow_ipv6_mcast_na_stats);
+	hddLog(LOG1, "wow_icmpv4_count %d", data->wow_icmpv4_count);
+	hddLog(LOG1, "wow_icmpv6_count %d", data->wow_icmpv6_count);
 
 	ipv6_rx_multicast_addr_cnt =
-		data->wow_ipv6_mcast_wake_up_count +
-		data->wow_ipv6_mcast_ra_stats +
-		data->wow_ipv6_mcast_ns_stats +
-		data->wow_ipv6_mcast_na_stats;
+		data->wow_ipv6_mcast_wake_up_count;
+
+	icmpv6_cnt =
+		data->wow_icmpv6_count;
 
 	rx_multicast_cnt =
 		data->wow_ipv4_mcast_wake_up_count +
@@ -10371,7 +10394,6 @@ static uint32_t hdd_send_wakelock_stats(hdd_context_t *hdd_ctx,
 		data->wow_ucast_wake_up_count +
 		data->wow_bcast_wake_up_count +
 		rx_multicast_cnt;
-
 
 	if (nla_put_u32(skb, PARAM_TOTAL_CMD_EVENT_WAKE, 0) ||
 	    nla_put_u32(skb, PARAM_CMD_EVENT_WAKE_CNT_PTR, 0) ||
@@ -10388,9 +10410,9 @@ static uint32_t hdd_send_wakelock_stats(hdd_context_t *hdd_ctx,
 	    nla_put_u32(skb, PARAM_RX_BROADCAST_CNT,
 				data->wow_bcast_wake_up_count) ||
 	    nla_put_u32(skb, PARAM_ICMP_PKT,
-				data->wow_ipv4_mcast_wake_up_count) ||
+				data->wow_icmpv4_count) ||
 	    nla_put_u32(skb, PARAM_ICMP6_PKT,
-				ipv6_rx_multicast_addr_cnt) ||
+				icmpv6_cnt) ||
 	    nla_put_u32(skb, PARAM_ICMP6_RA,
 				data->wow_ipv6_mcast_ra_stats) ||
 	    nla_put_u32(skb, PARAM_ICMP6_NA,
@@ -15576,50 +15598,24 @@ static int wlan_hdd_cfg80211_set_default_key( struct wiphy *wiphy,
 }
 
 /*
- * FUNCTION: wlan_hdd_cfg80211_update_bss_list
- * This function is used to inform nl80211 interface that BSS might have
- * been lost.
+ * wlan_hdd_cfg80211_update_bss_list :to inform nl80211
+ * interface that BSS might have been lost.
+ * @pAdapter: adaptor
+ * @bssid: bssid which might have been lost
+ *
+ * Return: bss which is unlinked from kernel cache
  */
 struct cfg80211_bss* wlan_hdd_cfg80211_update_bss_list(
-   hdd_adapter_t *pAdapter, tCsrRoamInfo *pRoamInfo)
+   hdd_adapter_t *pAdapter, tSirMacAddr bssid)
 {
     struct net_device *dev = pAdapter->dev;
     struct wireless_dev *wdev = dev->ieee80211_ptr;
     struct wiphy *wiphy = wdev->wiphy;
-    tSirBssDescription *pBssDesc = pRoamInfo->pBssDesc;
-    int chan_no;
-    unsigned int freq;
-    struct ieee80211_channel *chan;
     struct cfg80211_bss *bss = NULL;
 
-    if (NULL == pBssDesc) {
-        hddLog(LOGE, FL("pBssDesc is NULL"));
-        return bss;
-    }
-
-    if (NULL == pRoamInfo->pProfile) {
-        hddLog(LOGE, FL("Roam profile is NULL"));
-        return bss;
-    }
-
-    chan_no = pBssDesc->channelId;
-
-    if (chan_no <= ARRAY_SIZE(hdd_channels_2_4_GHZ)) {
-        freq = ieee80211_channel_to_frequency(chan_no, IEEE80211_BAND_2GHZ);
-    } else {
-        freq = ieee80211_channel_to_frequency(chan_no, IEEE80211_BAND_5GHZ);
-    }
-
-    chan = __ieee80211_get_channel(wiphy, freq);
-
-    if (!chan) {
-       hddLog(LOGE, FL("chan pointer is NULL"));
-       return NULL;
-    }
-
-    bss = cfg80211_get_bss(wiphy, chan, pBssDesc->bssId,
-                           &pRoamInfo->pProfile->SSIDs.SSIDList->SSID.ssId[0],
-                           pRoamInfo->pProfile->SSIDs.SSIDList->SSID.length,
+    bss = cfg80211_get_bss(wiphy, NULL, bssid,
+                           NULL,
+                           0,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0)) && !defined(WITH_BACKPORTS) \
      && !defined(IEEE80211_PRIVACY)
                            WLAN_CAPABILITY_ESS, WLAN_CAPABILITY_ESS);
@@ -15630,7 +15626,7 @@ struct cfg80211_bss* wlan_hdd_cfg80211_update_bss_list(
         hddLog(LOGE, FL("BSS not present"));
     } else {
         hddLog(LOG1, FL("cfg80211_unlink_bss called for BSSID "
-               MAC_ADDRESS_STR), MAC_ADDR_ARRAY(pBssDesc->bssId));
+               MAC_ADDRESS_STR), MAC_ADDR_ARRAY(bssid));
         cfg80211_unlink_bss(wiphy, bss);
     }
     return bss;
@@ -15769,7 +15765,9 @@ wlan_hdd_cfg80211_inform_bss_frame( hdd_adapter_t *pAdapter,
      * So drop the bss and continue to next bss.
      */
     if (chan == NULL) {
-       hddLog(LOGE, FL("chan pointer is NULL"));
+       hddLog(LOGE,
+                FL("chan pointer is NULL, chan_no: %d freq: %d"),
+                chan_no, freq);
        kfree(mgmt);
        return NULL;
     }
@@ -16172,7 +16170,7 @@ static eHalStatus hdd_cfg80211_scan_done_callback(tHalHandle halHandle,
                 vos_flush_logs(WLAN_LOG_TYPE_NON_FATAL,
                                WLAN_LOG_INDICATOR_HOST_DRIVER,
                                WLAN_LOG_REASON_NO_SCAN_RESULTS,
-                               true);
+                               DUMP_VOS_TRACE);
                 pHddCtx->last_scan_bug_report_timestamp = current_timestamp;
             }
         }
@@ -18380,6 +18378,10 @@ static int __wlan_hdd_cfg80211_disconnect( struct wiphy *wiphy,
              reasonCode = pHddCtx->cfg_ini->gEnableDeauthToDisassocMap ?
                  eCSR_DISCONNECT_REASON_STA_HAS_LEFT :
                  eCSR_DISCONNECT_REASON_DEAUTH;
+             vos_flush_logs(WLAN_LOG_TYPE_NON_FATAL,
+                            WLAN_LOG_INDICATOR_FRAMEWORK,
+                            WLAN_LOG_REASON_CODE_FRAMEWORK,
+                            DUMP_PACKET_TRACE);
              break;
         case WLAN_REASON_DISASSOC_STA_HAS_LEFT:
              reasonCode = eCSR_DISCONNECT_REASON_STA_HAS_LEFT;
@@ -21167,7 +21169,7 @@ static int __wlan_hdd_cfg80211_tdls_mgmt(struct wiphy *wiphy,
             vos_flush_logs(WLAN_LOG_TYPE_FATAL,
                            WLAN_LOG_INDICATOR_HOST_DRIVER,
                            WLAN_LOG_REASON_HDD_TIME_OUT,
-                           true);
+                           DUMP_VOS_TRACE);
         pAdapter->mgmtTxCompletionStatus = FALSE;
         wlan_hdd_tdls_check_bmps(pAdapter);
         return -EINVAL;

@@ -52,6 +52,7 @@
 #ifdef IPA_OFFLOAD
 #include <wlan_hdd_ipa.h>
 #endif
+#include "adf_trace.h"
 /*---------------------------------------------------------------------------
   Preprocessor definitions and constants
   -------------------------------------------------------------------------*/
@@ -348,7 +349,7 @@ int __hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
        ac = hdd_QdiscAcToTlAC[skb->queue_mapping];
        ++pAdapter->hdd_stats.hddTxRxStats.txXmitClassifiedAC[ac];
 
-       wlan_hdd_log_eapol(skb,
+       adf_dp_trace_log_pkt(pAdapter->sessionId, skb,
                           WIFI_EVENT_DRIVER_EAPOL_FRAME_TRANSMIT_REQUESTED);
 
 #ifdef QCA_PKT_PROTO_TRACE
@@ -358,13 +359,24 @@ int __hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
            /* Proto Trace enabled */
            proto_type = vos_pkt_get_proto_type(skb,
                         hddCtxt->cfg_ini->gEnableDebugLog, 0);
-           if (VOS_PKT_TRAC_TYPE_EAPOL & proto_type)
-           {
+           switch (proto_type) {
+           case VOS_PKT_TRAC_TYPE_EAPOL:
                vos_pkt_trace_buf_update("HA:T:EPL");
-           }
-           else if (VOS_PKT_TRAC_TYPE_DHCP & proto_type)
-           {
-               vos_pkt_trace_buf_update("HA:T:DHC");
+               break;
+           case VOS_PKT_TRAC_TYPE_DHCP:
+               hdd_dhcp_pkt_trace_buf_update(skb, TX_PATH, AP);
+               break;
+           case VOS_PKT_TRAC_TYPE_ARP:
+               vos_pkt_trace_buf_update("HA:T:ARP");
+               break;
+           case VOS_PKT_TRAC_TYPE_NS:
+               vos_pkt_trace_buf_update("HA:T:NS");
+               break;
+           case VOS_PKT_TRAC_TYPE_NA:
+               vos_pkt_trace_buf_update("HA:T:NA");
+               break;
+           default:
+               break;
            }
        }
 #endif /* QCA_PKT_PROTO_TRACE */
@@ -379,6 +391,20 @@ int __hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
            list_tail->next = skb;
            list_tail = list_tail->next;
        }
+       vos_mem_zero(skb->cb, sizeof(skb->cb));
+       NBUF_SET_PACKET_TRACK(skb, NBUF_TX_PKT_DATA_TRACK);
+       NBUF_UPDATE_TX_PKT_COUNT(skb, NBUF_TX_PKT_HDD);
+
+       adf_dp_trace_set_track(skb);
+       DPTRACE(adf_dp_trace(skb, ADF_DP_TRACE_HDD_PACKET_PTR_RECORD,
+                  (uint8_t *)&skb->data, sizeof(skb->data)));
+       DPTRACE(adf_dp_trace(skb, ADF_DP_TRACE_HDD_PACKET_RECORD,
+                  (uint8_t *)skb->data, skb->len));
+       if (skb->len > ADF_DP_TRACE_RECORD_SIZE)
+            DPTRACE(adf_dp_trace(skb, ADF_DP_TRACE_HDD_PACKET_RECORD,
+                  (uint8_t *)&skb->data[ADF_DP_TRACE_RECORD_SIZE],
+                  (skb->len - ADF_DP_TRACE_RECORD_SIZE)));
+
        skb = skb_next;
        continue;
 
@@ -444,6 +470,8 @@ static void __hdd_softap_tx_timeout(struct net_device *dev)
    hdd_adapter_t *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
    hdd_context_t *hdd_ctx;
 
+   DPTRACE(adf_dp_trace(NULL, ADF_DP_TRACE_HDD_SOFTAP_TX_TIMEOUT,
+                        NULL, 0));
    VOS_TRACE( VOS_MODULE_ID_HDD_SAP_DATA, VOS_TRACE_LEVEL_ERROR,
       "%s: Transmission timeout occurred", __func__);
 
@@ -799,16 +827,32 @@ VOS_STATUS hdd_softap_rx_packet_cbk(v_VOID_t *vosContext,
       ++pAdapter->stats.rx_packets;
       pAdapter->stats.rx_bytes += skb->len;
 
-      wlan_hdd_log_eapol(skb, WIFI_EVENT_DRIVER_EAPOL_FRAME_RECEIVED);
+      adf_dp_trace_log_pkt(pAdapter->sessionId, skb,
+          WIFI_EVENT_DRIVER_EAPOL_FRAME_RECEIVED);
 #ifdef QCA_PKT_PROTO_TRACE
       if ((pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_EAPOL) ||
           (pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_DHCP)) {
          proto_type = vos_pkt_get_proto_type(skb,
                            pHddCtx->cfg_ini->gEnableDebugLog, 0);
-         if (VOS_PKT_TRAC_TYPE_EAPOL & proto_type)
-            vos_pkt_trace_buf_update("HA:R:EPL");
-         else if (VOS_PKT_TRAC_TYPE_DHCP & proto_type)
-            vos_pkt_trace_buf_update("HA:R:DHC");
+         switch (proto_type) {
+         case VOS_PKT_TRAC_TYPE_EAPOL:
+             vos_pkt_trace_buf_update("HA:R:EPL");
+             break;
+         case VOS_PKT_TRAC_TYPE_DHCP:
+             hdd_dhcp_pkt_trace_buf_update(skb, RX_PATH, AP);
+             break;
+         case VOS_PKT_TRAC_TYPE_ARP:
+             vos_pkt_trace_buf_update("HA:R:ARP");
+             break;
+         case VOS_PKT_TRAC_TYPE_NS:
+             vos_pkt_trace_buf_update("HA:R:NS");
+             break;
+         case VOS_PKT_TRAC_TYPE_NA:
+             vos_pkt_trace_buf_update("HA:R:NA");
+             break;
+         default:
+             break;
+         }
       }
 #endif /* QCA_PKT_PROTO_TRACE */
 
@@ -821,11 +865,12 @@ VOS_STATUS hdd_softap_rx_packet_cbk(v_VOID_t *vosContext,
       if (skb->next) {
          rxstat = netif_rx(skb);
       } else {
-#ifdef WLAN_FEATURE_HOLD_RX_WAKELOCK
-         vos_wake_lock_timeout_acquire(&pHddCtx->rx_wake_lock,
-                                       HDD_WAKE_LOCK_DURATION,
-                                       WIFI_POWER_EVENT_WAKELOCK_HOLD_RX);
-#endif
+         if ((pHddCtx->cfg_ini->rx_wakelock_timeout) &&
+             (PACKET_BROADCAST != skb->pkt_type) &&
+             (PACKET_MULTICAST != skb->pkt_type))
+	    vos_wake_lock_timeout_acquire(&pHddCtx->rx_wake_lock,
+                        pHddCtx->cfg_ini->rx_wakelock_timeout,
+                        WIFI_POWER_EVENT_WAKELOCK_HOLD_RX);
          /*
           * This is the last packet on the chain
           * Scheduling rx sirq

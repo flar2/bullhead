@@ -77,6 +77,11 @@
 
 #define HDD_ETH_HEADER_LEN      14
 
+#define TX_PATH 1
+#define RX_PATH 0
+#define STA  1
+#define AP 0
+
 /*---------------------------------------------------------------------------
   Type declarations
   -------------------------------------------------------------------------*/
@@ -231,28 +236,6 @@ void hdd_tx_resume_cb(void *adapter_context,
 void hdd_tx_resume_timer_expired_handler(void *adapter_context);
 #endif /* QCA_LL_TX_FLOW_CT */
 
-#ifdef FEATURE_WLAN_DIAG_SUPPORT
-/**
- * wlan_hdd_log_eapol() - Function to check and extract EAPOL params
- * @skb:               skb data
- * @event_type:        One of enum wifi_connectivity_events to indicate Tx/Rx
- *
- * This function parses the input skb data to get the EAPOL params,if the
- * packet is EAPOL and store it in the pointer passed as input
- *
- * Return: None
- *
- */
-void wlan_hdd_log_eapol(struct sk_buff *skb,
-			uint8_t event_type);
-#else
-static inline void wlan_hdd_log_eapol(struct sk_buff *skb,
-				      uint8_t event_type)
-{
-
-}
-#endif /* FEATURE_WLAN_DIAG_SUPPORT */
-
 /**
  * hdd_mon_rx_packet_cbk() - Receive callback registered with TL.
  * @vosContext: [in] pointer to VOS context
@@ -267,4 +250,15 @@ static inline void wlan_hdd_log_eapol(struct sk_buff *skb,
  */
 VOS_STATUS hdd_mon_rx_packet_cbk(v_VOID_t *vos_ctx, adf_nbuf_t rx_buf,
 				 uint8_t sta_id);
+
+#ifdef QCA_PKT_PROTO_TRACE
+void hdd_dhcp_pkt_trace_buf_update(struct sk_buff *skb, int is_transmission,
+				   int is_sta);
+#else
+static inline void hdd_dhcp_pkt_trace_buf_update(struct sk_buff *skb,
+					    int is_transmission, int is_sta)
+{
+	return;
+}
+#endif
 #endif    // end #if !defined( WLAN_HDD_TX_RX_H )

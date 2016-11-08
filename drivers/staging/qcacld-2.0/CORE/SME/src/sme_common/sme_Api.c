@@ -504,7 +504,7 @@ tSmeCmd *smeGetCommandBuffer( tpAniSirGlobal pMac )
             vos_flush_logs(WLAN_LOG_TYPE_FATAL,
                            WLAN_LOG_INDICATOR_HOST_DRIVER,
                            WLAN_LOG_REASON_SME_OUT_OF_CMD_BUF,
-                           false);
+                           DUMP_NO_TRACE);
         } else {
             /* Trigger SSR */
             vos_wlanRestart();
@@ -11998,12 +11998,13 @@ eHalStatus sme_UpdateFwTdlsState(tHalHandle hHal, void  *psmeTdlsParams,
     tpAniSirGlobal pMac = NULL;
     vos_msg_t vosMessage;
 
+    pMac = PMAC_STRUCT(hHal);
+    if (NULL == pMac) {
+        return eHAL_STATUS_FAILURE;
+    }
+
     /* only acquire sme global lock before state update if asked to */
     if (useSmeLock) {
-        pMac = PMAC_STRUCT(hHal);
-        if (NULL == pMac)
-            return eHAL_STATUS_FAILURE;
-
         status = sme_AcquireGlobalLock(&pMac->sme);
         if (eHAL_STATUS_SUCCESS != status)
             return status;
@@ -13923,14 +13924,14 @@ void activeListCmdTimeoutHandle(void *userData)
         vos_flush_logs(WLAN_LOG_TYPE_FATAL,
                        WLAN_LOG_INDICATOR_HOST_DRIVER,
                        WLAN_LOG_REASON_SME_COMMAND_STUCK,
-                       false);
+                       DUMP_NO_TRACE);
     } else {
         vosTraceDumpAll(mac_ctx, 0, 0, 500, 0);
     }
 
     if (mac_ctx->sme.enableSelfRecovery) {
         sme_SaveActiveCmdStats(hal);
-        vos_trigger_recovery();
+        vos_trigger_recovery(false);
     } else {
         if (!mac_ctx->roam.configParam.enable_fatal_event &&
             !(vos_is_load_unload_in_progress(VOS_MODULE_ID_SME, NULL) ||
@@ -18808,4 +18809,29 @@ eHalStatus sme_enable_disable_chanavoidind_event(tHalHandle hal,
 	}
 
 	return eHAL_STATUS_FAILURE;
+}
+
+/**
+ * sme_remove_bssid_from_scan_list() - wrapper to remove the bssid from
+ * scan list
+ * @hal: hal context.
+ * @bssid: bssid to be removed
+ *
+ * This function remove the given bssid from scan list.
+ *
+ * Return: hal status.
+ */
+eHalStatus sme_remove_bssid_from_scan_list(tHalHandle hal,
+	tSirMacAddr bssid)
+{
+	eHalStatus status = eHAL_STATUS_FAILURE;
+	tpAniSirGlobal mac_ctx = PMAC_STRUCT(hal);
+
+	status = sme_AcquireGlobalLock(&mac_ctx->sme);
+	if (HAL_STATUS_SUCCESS(status)) {
+		csr_remove_bssid_from_scan_list(mac_ctx, bssid);
+		sme_ReleaseGlobalLock(&mac_ctx->sme);
+	}
+
+	return status;
 }

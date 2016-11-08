@@ -65,6 +65,7 @@
 #ifdef IPA_OFFLOAD
 #include <wlan_hdd_ipa.h>
 #endif
+#include "adf_trace.h"
 
 /*---------------------------------------------------------------------------
   Preprocessor definitions and constants
@@ -85,55 +86,8 @@ const v_U8_t hdd_QdiscAcToTlAC[] = {
 };
 
 /*---------------------------------------------------------------------------
-  Type declarations
-  -------------------------------------------------------------------------*/
-
-#ifdef FEATURE_WLAN_DIAG_SUPPORT
-#define HDD_EAPOL_ETHER_TYPE             (0x888E)
-#define HDD_EAPOL_ETHER_TYPE_OFFSET      (12)
-#define HDD_EAPOL_PACKET_TYPE_OFFSET     (15)
-#define HDD_EAPOL_KEY_INFO_OFFSET        (19)
-#define HDD_EAPOL_DEST_MAC_OFFSET        (0)
-#define HDD_EAPOL_SRC_MAC_OFFSET         (6)
-#define EAPOL_MASK                       0x8013
-#define EAPOL_M1_BIT_MASK                0x8000
-#define EAPOL_M2_BIT_MASK                0x0001
-#define EAPOL_M3_BIT_MASK                0x8013
-#define EAPOL_M4_BIT_MASK                0x0003
-#endif /* FEATURE_WLAN_DIAG_SUPPORT */
-
-/*---------------------------------------------------------------------------
   Function definitions and documentation
   -------------------------------------------------------------------------*/
-
-/**
- * wlan_hdd_is_eapol() - Function to check if frame is EAPOL or not
- * @skb:    skb data
- *
- * This function checks if the frame is an EAPOL frame or not
- *
- * Return: true (1) if packet is EAPOL
- *
- */
-static bool wlan_hdd_is_eapol(struct sk_buff *skb)
-{
-	uint16_t ether_type;
-
-	if (!skb) {
-		hddLog(VOS_TRACE_LEVEL_ERROR, FL("skb is NULL"));
-		return false;
-	}
-
-	ether_type = (uint16_t)(*(uint16_t *)
-			(skb->data + HDD_ETHERTYPE_802_1_X_FRAME_OFFSET));
-
-	if (ether_type == VOS_SWAP_U16(HDD_ETHERTYPE_802_1_X)) {
-		return true;
-	} else {
-		/* No error msg handled since this will happen often */
-		return false;
-	}
-}
 
 /**
  * wlan_hdd_is_wai() - Check if frame is EAPOL or WAPI
@@ -396,6 +350,13 @@ void hdd_tx_resume_cb(void *adapter_context,
  */
 void hdd_drop_skb(hdd_adapter_t *adapter, struct sk_buff *skb)
 {
+	DPTRACE(adf_dp_trace(skb, ADF_DP_TRACE_DROP_PACKET_RECORD,
+			(uint8_t *)skb->data, skb->len));
+	if (skb->len > ADF_DP_TRACE_RECORD_SIZE)
+		DPTRACE(adf_dp_trace(skb, ADF_DP_TRACE_DROP_PACKET_RECORD,
+				(uint8_t *)&skb->data[ADF_DP_TRACE_RECORD_SIZE],
+				(skb->len - ADF_DP_TRACE_RECORD_SIZE)));
+
 	++adapter->stats.tx_dropped;
 	++adapter->hdd_stats.hddTxRxStats.txXmitDropped;
 	kfree_skb(skb);
@@ -416,6 +377,14 @@ void hdd_drop_skb_list(hdd_adapter_t *adapter, struct sk_buff *skb,
 	struct sk_buff *skb_next;
 
 	while (skb) {
+		DPTRACE(adf_dp_trace(skb, ADF_DP_TRACE_DROP_PACKET_RECORD,
+				(uint8_t *)skb->data, skb->len));
+		if (skb->len > ADF_DP_TRACE_RECORD_SIZE)
+			DPTRACE(adf_dp_trace(skb,
+				ADF_DP_TRACE_DROP_PACKET_RECORD,
+				(uint8_t *)&skb->data[ADF_DP_TRACE_RECORD_SIZE],
+				(skb->len - ADF_DP_TRACE_RECORD_SIZE)));
+
 		++adapter->stats.tx_dropped;
 		++adapter->hdd_stats.hddTxRxStats.txXmitDropped;
 		if (is_update_ac_stats == TRUE) {
@@ -620,22 +589,30 @@ int __hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
            skb->queue_mapping = hddLinuxUpToAcMap[up];
        }
 
-       wlan_hdd_log_eapol(skb,
-                          WIFI_EVENT_DRIVER_EAPOL_FRAME_TRANSMIT_REQUESTED);
-
 #ifdef QCA_PKT_PROTO_TRACE
        if ((hddCtxt->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_EAPOL) ||
            (hddCtxt->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_DHCP))
        {
            proto_type = vos_pkt_get_proto_type(skb,
                         hddCtxt->cfg_ini->gEnableDebugLog, 0);
-           if (VOS_PKT_TRAC_TYPE_EAPOL & proto_type)
-           {
+           switch (proto_type) {
+           case VOS_PKT_TRAC_TYPE_EAPOL:
                vos_pkt_trace_buf_update("ST:T:EPL");
-           }
-           else if (VOS_PKT_TRAC_TYPE_DHCP & proto_type)
-           {
-               vos_pkt_trace_buf_update("ST:T:DHC");
+               break;
+           case VOS_PKT_TRAC_TYPE_DHCP:
+               hdd_dhcp_pkt_trace_buf_update(skb, TX_PATH, STA);
+               break;
+           case VOS_PKT_TRAC_TYPE_ARP:
+               vos_pkt_trace_buf_update("ST:T:ARP");
+               break;
+           case VOS_PKT_TRAC_TYPE_NS:
+               vos_pkt_trace_buf_update("ST:T:NS");
+               break;
+           case VOS_PKT_TRAC_TYPE_NA:
+               vos_pkt_trace_buf_update("ST:T:NA");
+               break;
+           default:
+               break;
            }
        }
 #endif /* QCA_PKT_PROTO_TRACE */
@@ -650,6 +627,21 @@ int __hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
            list_tail->next = skb;
            list_tail = list_tail->next;
        }
+       vos_mem_zero(skb->cb, sizeof(skb->cb));
+       adf_dp_trace_log_pkt(pAdapter->sessionId, skb,
+           WIFI_EVENT_DRIVER_EAPOL_FRAME_TRANSMIT_REQUESTED);
+       NBUF_SET_PACKET_TRACK(skb, NBUF_TX_PKT_DATA_TRACK);
+       NBUF_UPDATE_TX_PKT_COUNT(skb, NBUF_TX_PKT_HDD);
+
+       adf_dp_trace_set_track(skb);
+       DPTRACE(adf_dp_trace(skb, ADF_DP_TRACE_HDD_PACKET_PTR_RECORD,
+                 (uint8_t *)&skb->data, sizeof(skb->data)));
+       DPTRACE(adf_dp_trace(skb, ADF_DP_TRACE_HDD_PACKET_RECORD,
+                 (uint8_t *)skb->data, skb->len));
+       if (skb->len > ADF_DP_TRACE_RECORD_SIZE)
+           DPTRACE(adf_dp_trace(skb, ADF_DP_TRACE_HDD_PACKET_RECORD,
+                      (uint8_t *)&skb->data[ADF_DP_TRACE_RECORD_SIZE],
+                      (skb->len - ADF_DP_TRACE_RECORD_SIZE)));
        skb = skb_next;
        continue;
 
@@ -746,6 +738,8 @@ static void __hdd_tx_timeout(struct net_device *dev)
 
    hddLog(LOGE, FL("Transmission timeout occurred jiffies %lu trans_start %lu"),
           jiffies, dev->trans_start);
+   DPTRACE(adf_dp_trace(NULL, ADF_DP_TRACE_HDD_TX_TIMEOUT,
+                        NULL, 0));
    /*
     * Getting here implies we disabled the TX queues for too long. Queues are
     * disabled either because of disassociation or low resource scenarios. In
@@ -1152,17 +1146,33 @@ VOS_STATUS hdd_rx_packet_cbk(v_VOID_t *vosContext,
             continue;
       }
 
-      wlan_hdd_log_eapol(skb, WIFI_EVENT_DRIVER_EAPOL_FRAME_RECEIVED);
+      adf_dp_trace_log_pkt(pAdapter->sessionId, skb,
+          WIFI_EVENT_DRIVER_EAPOL_FRAME_RECEIVED);
 
 #ifdef QCA_PKT_PROTO_TRACE
       if ((pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_EAPOL) ||
           (pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_DHCP)) {
          proto_type = vos_pkt_get_proto_type(skb,
                         pHddCtx->cfg_ini->gEnableDebugLog, 0);
-         if (VOS_PKT_TRAC_TYPE_EAPOL & proto_type)
-            vos_pkt_trace_buf_update("ST:R:EPL");
-         else if (VOS_PKT_TRAC_TYPE_DHCP & proto_type)
-            vos_pkt_trace_buf_update("ST:R:DHC");
+         switch (proto_type) {
+         case VOS_PKT_TRAC_TYPE_EAPOL:
+             vos_pkt_trace_buf_update("ST:R:EPL");
+             break;
+         case VOS_PKT_TRAC_TYPE_DHCP:
+             hdd_dhcp_pkt_trace_buf_update(skb, RX_PATH, STA);
+             break;
+         case VOS_PKT_TRAC_TYPE_ARP:
+             vos_pkt_trace_buf_update("ST:R:ARP");
+             break;
+         case VOS_PKT_TRAC_TYPE_NS:
+             vos_pkt_trace_buf_update("ST:R:NS");
+             break;
+         case VOS_PKT_TRAC_TYPE_NA:
+             vos_pkt_trace_buf_update("ST:R:NA");
+             break;
+         default:
+             break;
+         }
       }
 #endif /* QCA_PKT_PROTO_TRACE */
 
@@ -1194,11 +1204,12 @@ VOS_STATUS hdd_rx_packet_cbk(v_VOID_t *vosContext,
       if (skb->next) {
          rxstat = netif_rx(skb);
       } else {
-#ifdef WLAN_FEATURE_HOLD_RX_WAKELOCK
-         vos_wake_lock_timeout_acquire(&pHddCtx->rx_wake_lock,
-                                       HDD_WAKE_LOCK_DURATION,
-                                       WIFI_POWER_EVENT_WAKELOCK_HOLD_RX);
-#endif
+         if ((pHddCtx->cfg_ini->rx_wakelock_timeout) &&
+             (PACKET_BROADCAST != skb->pkt_type) &&
+             (PACKET_MULTICAST != skb->pkt_type))
+	    vos_wake_lock_timeout_acquire(&pHddCtx->rx_wake_lock,
+                        pHddCtx->cfg_ini->rx_wakelock_timeout,
+                        WIFI_POWER_EVENT_WAKELOCK_HOLD_RX);
          /*
           * This is the last packet on the chain
           * Scheduling rx sirq
@@ -1219,122 +1230,83 @@ VOS_STATUS hdd_rx_packet_cbk(v_VOID_t *vosContext,
    return VOS_STATUS_SUCCESS;
 }
 
-#ifdef FEATURE_WLAN_DIAG_SUPPORT
-
+#ifdef QCA_PKT_PROTO_TRACE
 /**
- * wlan_hdd_get_eapol_params() - Function to extract EAPOL params
- * @skb:                sbb data
- * @eapol_params:       Pointer to hold the parsed EAPOL params
- * @event_type:         Event type to indicate Tx/Rx
- *
- * This function parses the input skb data to get the EAPOL params,if the
- * packet is EAPOL and store it in the pointer passed as input
- *
- * Return: 0 on success and negative value in failure
- *
- */
-static int wlan_hdd_get_eapol_params(struct sk_buff *skb,
-			      struct vos_event_wlan_eapol *eapol_params,
-			      uint8_t event_type)
-{
-	bool ret;
-	uint8_t packet_type=0;
-
-	ret = wlan_hdd_is_eapol(skb);
-
-	if (!ret)
-		return -1;
-
-	packet_type = (uint8_t)(*(uint8_t *)
-			(skb->data + HDD_EAPOL_PACKET_TYPE_OFFSET));
-
-	eapol_params->eapol_packet_type = packet_type;
-	eapol_params->eapol_key_info = (uint16_t)(*(uint16_t *)
-				       (skb->data + HDD_EAPOL_KEY_INFO_OFFSET));
-	eapol_params->event_sub_type = event_type;
-	eapol_params->eapol_rate = 0;/* As of now, zero */
-
-	vos_mem_copy(eapol_params->dest_addr,
-			(skb->data + HDD_EAPOL_DEST_MAC_OFFSET),
-			sizeof(eapol_params->dest_addr));
-	vos_mem_copy(eapol_params->src_addr,
-			(skb->data + HDD_EAPOL_SRC_MAC_OFFSET),
-			sizeof(eapol_params->src_addr));
-	return 0;
-}
-/**
- * wlan_hdd_event_eapol_log() - Function to log EAPOL events
- * @eapol_params:    Structure containing EAPOL params
- *
- * This function logs the parsed EAPOL params
+ * hdd_dhcp_pkt_trace_buf_update() - Update protocol trace buffer with DHCP
+ * packet info.
+ * @skb: skb pointer
+ * @is_transmission: packet is in transmission or in rx
+ * @is_sta: tx/rx by STA mode
  *
  * Return: None
- *
  */
-static void wlan_hdd_event_eapol_log(struct vos_event_wlan_eapol eapol_params)
+void hdd_dhcp_pkt_trace_buf_update (struct sk_buff *skb, int is_transmission,
+				    int is_sta)
 {
-	WLAN_VOS_DIAG_EVENT_DEF(wlan_diag_event, struct vos_event_wlan_eapol);
+	char tbuf[20];
+	if ((skb->data[DHCP_OPTION53_OFFSET] == DHCP_OPTION53) &&
+	   (skb->data[DHCP_OPTION53_LENGTH_OFFSET] ==
+	   DHCP_OPTION53_LENGTH)) {
 
-	wlan_diag_event.event_sub_type = eapol_params.event_sub_type;
-	wlan_diag_event.eapol_packet_type = eapol_params.eapol_packet_type;
-	wlan_diag_event.eapol_key_info = eapol_params.eapol_key_info;
-	wlan_diag_event.eapol_rate = eapol_params.eapol_rate;
-	vos_mem_copy(wlan_diag_event.dest_addr,
-		     eapol_params.dest_addr,
-		     sizeof (wlan_diag_event.dest_addr));
-        vos_mem_copy(wlan_diag_event.src_addr,
-		     eapol_params.src_addr,
-		     sizeof (wlan_diag_event.src_addr));
-
-	WLAN_VOS_DIAG_EVENT_REPORT(&wlan_diag_event, EVENT_WLAN_EAPOL);
-}
-
-/**
- * wlan_hdd_log_eapol() - Function to check and extract EAPOL params
- * @skb:               skb data
- * @event_type:        One of enum wifi_connectivity_events to indicate Tx/Rx
- *
- * This function parses the input skb data to get the EAPOL params,if the
- * packet is EAPOL and store it in the pointer passed as input
- *
- * Return: None
- *
- */
-void wlan_hdd_log_eapol(struct sk_buff *skb,
-		uint8_t event_type)
-{
-	int ret;
-	struct vos_event_wlan_eapol eapol_params;
-
-	ret = wlan_hdd_get_eapol_params(skb, &eapol_params, event_type);
-	if (ret)
-		return;
-
-	wlan_hdd_event_eapol_log(eapol_params);
-	if ((eapol_params.eapol_key_info & EAPOL_MASK) == EAPOL_M1_BIT_MASK) {
-		hddLog(LOG1,
-			FL("%s: M1 packet"), eapol_params.event_sub_type ==
-				WIFI_EVENT_DRIVER_EAPOL_FRAME_RECEIVED ?
-								"RX" : "TX");
-	} else if ((eapol_params.eapol_key_info & EAPOL_MASK) ==
-						EAPOL_M2_BIT_MASK) {
-		hddLog(LOG1,
-			FL("%s: M2 packet"), eapol_params.event_sub_type ==
-				WIFI_EVENT_DRIVER_EAPOL_FRAME_RECEIVED ?
-								"RX" : "TX");
-
-	} else if ((eapol_params.eapol_key_info & EAPOL_MASK) ==
-						EAPOL_M3_BIT_MASK) {
-		hddLog(LOG1,
-			FL("%s: M3 packet"), eapol_params.event_sub_type ==
-				WIFI_EVENT_DRIVER_EAPOL_FRAME_RECEIVED ?
-								"RX" : "TX");
-	} else if ((eapol_params.eapol_key_info & EAPOL_MASK) ==
-						EAPOL_M4_BIT_MASK) {
-		hddLog(LOG1,
-			FL("%s: M4 packet"), eapol_params.event_sub_type ==
-				WIFI_EVENT_DRIVER_EAPOL_FRAME_RECEIVED ?
-								"RX" : "TX");
+		switch (skb->data[DHCP_OPTION53_STATUS_OFFSET]) {
+		case DHCPDISCOVER:
+			snprintf(tbuf, sizeof(tbuf),
+				"%s:%s:DHCP DIS",
+				is_sta?"ST":"HA",
+				is_transmission?"T":"R");
+			break;
+		case DHCPREQUEST:
+			snprintf(tbuf, sizeof(tbuf),
+				"%s:%s:DHCP REQ",
+				is_sta?"ST":"HA",
+				is_transmission?"T":"R");
+			break;
+		case DHCPOFFER:
+			snprintf(tbuf, sizeof(tbuf),
+				"%s:%s:DHCP OFF",
+				is_sta?"ST":"HA",
+				is_transmission?"T":"R");
+			break;
+		case DHCPACK:
+			snprintf(tbuf, sizeof(tbuf),
+				"%s:%s:DHCP ACK",
+				is_sta?"ST":"HA",
+				is_transmission?"T":"R");
+			break;
+		case DHCPNAK:
+			snprintf(tbuf, sizeof(tbuf),
+				"%s:%s:DHCP NAK",
+				is_sta?"ST":"HA",
+				is_transmission?"T":"R");
+			break;
+		case DHCPRELEASE:
+			snprintf(tbuf, sizeof(tbuf),
+				"%s:%s:DHCP REL",
+				is_sta?"ST":"HA",
+				is_transmission?"T":"R");
+			break;
+		case DHCPINFORM:
+			snprintf(tbuf, sizeof(tbuf),
+				"%s:%s:DHCP INF",
+				is_sta?"ST":"HA",
+				is_transmission?"T":"R");
+			break;
+		case DHCPDECLINE:
+			snprintf(tbuf, sizeof(tbuf),
+				"%s:%s:DHCP DELC",
+				is_sta?"ST":"HA",
+				is_transmission?"T":"R");
+			break;
+		default:
+			snprintf(tbuf, sizeof(tbuf),
+				"%s:%s:DHCP INVL",
+				is_sta?"ST":"HA",
+				is_transmission?"T":"R");
+			break;
+		}
+		vos_pkt_trace_buf_update(tbuf);
+		VOS_TRACE(VOS_MODULE_ID_HDD_DATA, VOS_TRACE_LEVEL_INFO,
+			  FL("%s"), tbuf);
 	}
 }
-#endif /* FEATURE_WLAN_DIAG_SUPPORT */
+#endif

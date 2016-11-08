@@ -6060,6 +6060,10 @@ typedef struct
 #define WIFI_STATS_IFACE_AC           0x00000040
 /* all contention (min, max, avg) statistics (within ac statistics) */
 #define WIFI_STATS_IFACE_CONTENTION   0x00000080
+/** All peer stats on this interface */
+#define WIFI_STATS_IFACE_ALL_PEER      0x00000100
+/** Clear particular peer stats depending on the peer_mac */
+#define WIFI_STATS_IFACE_PER_PEER      0x00000200
 
 typedef struct
 {
@@ -6770,6 +6774,8 @@ struct sir_bpf_get_offload {
  * @wow_ipv6_mcast_ra_stats: ipv6 multicast ra stats
  * @wow_ipv6_mcast_ns_stats: ipv6 multicast ns stats
  * @wow_ipv6_mcast_na_stats: ipv6 multicast na stats
+ * @wow_icmpv4_count: ipv4 icmp packet count
+ * @wow_icmpv6_count: ipv6 icmp packet count
  */
 struct sir_wake_lock_stats {
 	uint32_t wow_ucast_wake_up_count;
@@ -6779,6 +6785,8 @@ struct sir_wake_lock_stats {
 	uint32_t wow_ipv6_mcast_ra_stats;
 	uint32_t wow_ipv6_mcast_ns_stats;
 	uint32_t wow_ipv6_mcast_na_stats;
+	uint32_t wow_icmpv4_count;
+	uint32_t wow_icmpv6_count;
 };
 
 /**

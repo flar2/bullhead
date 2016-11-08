@@ -30,6 +30,7 @@
 #include <adf_os_time.h>      /* adf_os_ticks, etc. */
 #include <adf_nbuf.h>         /* adf_nbuf_t */
 #include <adf_net_types.h>    /* ADF_NBUF_TX_EXT_TID_INVALID */
+#include "adf_trace.h"
 
 #include <queue.h>            /* TAILQ */
 #ifdef QCA_COMPUTE_TX_DELAY
@@ -218,6 +219,11 @@ ol_tx_send(
 
     msdu_credit_consumed = ol_tx_send_base(pdev, tx_desc, msdu);
     id = ol_tx_desc_id(pdev, tx_desc);
+    NBUF_UPDATE_TX_PKT_COUNT(msdu, NBUF_TX_PKT_TXRX);
+    DPTRACE(adf_dp_trace_ptr(msdu, ADF_DP_TRACE_TXRX_PACKET_PTR_RECORD,
+                adf_nbuf_data_addr(msdu),
+                sizeof(adf_nbuf_data(msdu)), tx_desc->id, 0));
+
     failed = htt_tx_send_std(pdev->htt_pdev, msdu, id);
     if (adf_os_unlikely(failed)) {
         OL_TX_TARGET_CREDIT_INCR_INT(pdev, msdu_credit_consumed);
@@ -263,6 +269,7 @@ ol_tx_send_nonstd(
 
     msdu_credit_consumed = ol_tx_send_base(pdev, tx_desc, msdu);
     id = ol_tx_desc_id(pdev, tx_desc);
+    NBUF_UPDATE_TX_PKT_COUNT(msdu, NBUF_TX_PKT_TXRX);
     failed = htt_tx_send_nonstd(
         pdev->htt_pdev, msdu, id, pkt_type);
     if (failed) {
@@ -548,7 +555,11 @@ ol_tx_completion_handler(
         tx_desc = td_array[tx_desc_id].tx_desc;
         tx_desc->status = status;
         netbuf = tx_desc->netbuf;
-
+        DPTRACE(adf_dp_trace_ptr(netbuf,
+                                 ADF_DP_TRACE_FREE_PACKET_PTR_RECORD,
+                                 adf_nbuf_data_addr(netbuf),
+                                 sizeof(adf_nbuf_data(netbuf)),
+                                 tx_desc->id, status));
         if (pdev->cfg.is_high_latency) {
             OL_TX_DESC_UPDATE_GROUP_CREDIT(pdev, tx_desc_id, 1, 0, status);
         }
@@ -569,6 +580,7 @@ ol_tx_completion_handler(
                 pdev, tx_desc, tx_descs, netbuf,
                 lcl_freelist, tx_desc_last, status);
         }
+        NBUF_UPDATE_TX_PKT_COUNT(netbuf, NBUF_TX_PKT_FREE);
 #ifdef QCA_SUPPORT_TXDESC_SANITY_CHECKS
         tx_desc->pkt_type = 0xff;
 #ifdef QCA_COMPUTE_TX_DELAY
@@ -747,6 +759,7 @@ ol_tx_single_completion_handler(
     tx_desc->status = status;
     netbuf = tx_desc->netbuf;
 
+    NBUF_UPDATE_TX_PKT_COUNT(netbuf, NBUF_TX_PKT_FREE);
     /* Do one shot statistics */
     TXRX_STATS_UPDATE_TX_STATS(pdev, status, 1, adf_nbuf_len(netbuf));
 

@@ -73,6 +73,7 @@
 
 #include "sapApi.h"
 #include "vos_trace.h"
+#include "adf_trace.h"
 
 
 
@@ -177,6 +178,7 @@ VOS_STATUS vos_preOpen ( v_CONTEXT_t *pVosContext )
    #endif
    vos_register_debugcb_init();
 
+   adf_dp_trace_init();
    return VOS_STATUS_SUCCESS;
 
 } /* vos_preOpen()*/
@@ -1892,7 +1894,7 @@ VOS_STATUS vos_mq_post_message_by_priority(VOS_MQ_ID msgQueueId,
            vos_flush_logs(WLAN_LOG_TYPE_FATAL,
                           WLAN_LOG_INDICATOR_HOST_ONLY,
                           WLAN_LOG_REASON_VOS_MSG_UNDER_RUN,
-                          true);
+                          DUMP_VOS_TRACE);
       }
       if (VOS_WRAPPER_MAX_FAIL_COUNT == debug_count) {
           vos_wlanRestart();
@@ -2363,12 +2365,30 @@ v_BOOL_t vos_is_packet_log_enabled(void)
    return pHddCtx->cfg_ini->enablePacketLog;
 }
 
-void vos_trigger_recovery(void)
+VOS_STATUS vos_config_silent_recovery(pVosContextType vos_context)
+{
+	struct ol_softc *scn;
+	struct device *dev;
+
+	if (vos_is_logp_in_progress(VOS_MODULE_ID_VOSS, NULL)) {
+		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+			FL("LOGP is in progress, ignore!"));
+		return VOS_STATUS_E_FAILURE;
+	}
+	vos_set_logp_in_progress(VOS_MODULE_ID_VOSS, TRUE);
+	scn = vos_get_context(VOS_MODULE_ID_HIF, vos_context);
+	if (scn && scn->hif_sc) {
+		dev = scn->hif_sc->dev;
+		if (dev)
+			vos_schedule_recovery_work(dev);
+	}
+	return VOS_STATUS_SUCCESS;
+}
+
+void vos_trigger_recovery(bool skip_crash_inject)
 {
 	pVosContextType vos_context;
 	tp_wma_handle wma_handle;
-	struct ol_softc *scn;
-	struct device *dev;
 	VOS_STATUS status = VOS_STATUS_SUCCESS;
 	void *runtime_context = NULL;
 
@@ -2390,28 +2410,23 @@ void vos_trigger_recovery(void)
 	runtime_context = vos_runtime_pm_prevent_suspend_init("vos_recovery");
 	vos_runtime_pm_prevent_suspend(runtime_context);
 
-	wma_crash_inject(wma_handle, RECOVERY_SIM_SELF_RECOVERY, 0);
+	if (!skip_crash_inject) {
+		wma_crash_inject(wma_handle, RECOVERY_SIM_SELF_RECOVERY, 0);
+		status = vos_wait_single_event(&wma_handle->recovery_event,
+			WMA_CRASH_INJECT_TIMEOUT);
 
-	status = vos_wait_single_event(&wma_handle->recovery_event,
-		WMA_CRASH_INJECT_TIMEOUT);
-
-	if (VOS_STATUS_SUCCESS != status) {
-		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
-			"CRASH_INJECT command is timed out!");
-		if (vos_is_logp_in_progress(VOS_MODULE_ID_VOSS, NULL)) {
+		if (VOS_STATUS_SUCCESS != status) {
 			VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
-				"LOGP is in progress, ignore!");
+				"CRASH_INJECT command is timed out!");
+			if (!vos_config_silent_recovery(vos_context))
+				goto out;
+		}
+	} else {
+		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+				FL("trigger silent recovery!"));
+		if (!vos_config_silent_recovery(vos_context))
 			goto out;
-		}
-		vos_set_logp_in_progress(VOS_MODULE_ID_VOSS, TRUE);
-		scn = vos_get_context(VOS_MODULE_ID_HIF, vos_context);
-		if (scn && scn->hif_sc) {
-			dev = scn->hif_sc->dev;
-			if (dev)
-				vos_schedule_recovery_work(dev);
-		}
 	}
-
 out:
 	vos_runtime_pm_allow_suspend(runtime_context);
 	vos_runtime_pm_prevent_suspend_deinit(runtime_context);
@@ -2825,6 +2840,8 @@ void vos_wlan_flush_host_logs_for_fatal(void)
  * @indicator: Source which trigerred the bug report
  * @reason_code: Reason for triggering bug report
  * @dump_vos_trace: If vos trace are needed in logs.
+ * @pkt_trace: flag to indicate when to report packet trace
+ *             dump this info when connection related error occurs
  *
  * This function sets the log related params and send the WMI command to the
  * FW to flush its logs. On receiving the flush completion event from the FW
@@ -2835,7 +2852,7 @@ void vos_wlan_flush_host_logs_for_fatal(void)
 VOS_STATUS vos_flush_logs(uint32_t is_fatal,
 		uint32_t indicator,
 		uint32_t reason_code,
-		bool dump_vos_trace)
+		uint32_t dump_trace)
 {
 	uint32_t ret;
 	VOS_STATUS status;
@@ -2876,14 +2893,15 @@ VOS_STATUS vos_flush_logs(uint32_t is_fatal,
 	}
 
 	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
-			"%s: Triggering bug report: type:%d, indicator=%d reason_code=%d",
-			__func__, is_fatal, indicator, reason_code);
+			"%s: Triggering bug report: type:%d, indicator=%d reason_code=%d dump_trace=0x%x",
+			__func__, is_fatal, indicator, reason_code, dump_trace);
 
-	if (dump_vos_trace)
+	if (dump_trace & DUMP_VOS_TRACE)
 		vosTraceDumpAll(vos_context->pMACContext, 0, 0, 500, 0);
 
 #ifdef QCA_PKT_PROTO_TRACE
-	vos_pkt_trace_buf_dump();
+	if (dump_trace & DUMP_PACKET_TRACE)
+		vos_pkt_trace_buf_dump();
 #endif
 	if (WLAN_LOG_INDICATOR_HOST_ONLY == indicator) {
 		vos_wlan_flush_host_logs_for_fatal();

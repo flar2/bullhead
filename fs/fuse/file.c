@@ -7,7 +7,7 @@
 */
 
 #include "fuse_i.h"
-#include "fuse_stacked.h"
+#include "fuse_shortcircuit.h"
 
 #include <linux/pagemap.h>
 #include <linux/slab.h>
@@ -65,6 +65,9 @@ struct fuse_file *fuse_file_alloc(struct fuse_conn *fc)
 		return NULL;
 
 	ff->rw_lower_file = NULL;
+	ff->shortcircuit_enabled = 0;
+	if (fc->shortcircuit_io)
+		ff->shortcircuit_enabled = 1;
 	ff->fc = fc;
 	ff->reserved_req = fuse_request_alloc(0);
 	if (unlikely(!ff->reserved_req)) {
@@ -269,7 +272,7 @@ void fuse_release_common(struct file *file, int opcode)
 	if (unlikely(!ff))
 		return;
 
-	fuse_stacked_release(ff);
+	fuse_shortcircuit_release(ff);
 
 	req = ff->reserved_req;
 	fuse_prepare_release(ff, file->f_flags, opcode);
@@ -987,8 +990,8 @@ static ssize_t fuse_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 			return err;
 	}
 
-	if (ff && ff->rw_lower_file)
-		ret_val = fuse_stacked_aio_read(iocb, iov, nr_segs, pos);
+	if (ff && ff->shortcircuit_enabled && ff->rw_lower_file)
+		ret_val = fuse_shortcircuit_aio_read(iocb, iov, nr_segs, pos);
 	else
 		ret_val = generic_file_aio_read(iocb, iov, nr_segs, pos);
 
@@ -1230,9 +1233,9 @@ static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 {
 	struct file *file = iocb->ki_filp;
 	struct address_space *mapping = file->f_mapping;
-	struct fuse_file *ff = file->private_data;
 	size_t count = 0;
 	size_t ocount = 0;
+	struct fuse_file *ff = file->private_data;
 	ssize_t written = 0;
 	ssize_t written_buffered = 0;
 	struct inode *inode = mapping->host;
@@ -1277,21 +1280,9 @@ static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	if (err)
 		goto out;
 
-	if (ff && ff->rw_lower_file) {
-		/* Use iocb->ki_pos instead of pos to handle the cases of files
-		 * that are opened with O_APPEND. For example if multiple
-		 * processes open the same file with O_APPEND then the
-		 * iocb->ki_pos will not be equal to the new pos value that is
-		 * updated with the file size(to guarantee appends even when
-		 * the file has grown due to the writes by another process).
-		 * We should use iocb->pos here since the lower filesystem
-		 * is expected to adjust for O_APPEND anyway and may need to
-		 * adjust the size for the file changes that occur due to
-		 * some processes writing directly to the lower filesystem
-		 * without using fuse.
-		 */
-		written = fuse_stacked_aio_write(iocb, iov, nr_segs,
-							iocb->ki_pos);
+	if (ff && ff->shortcircuit_enabled && ff->rw_lower_file) {
+		written = fuse_shortcircuit_aio_write(iocb, iov, nr_segs,
+						      iocb->ki_pos);
 		goto out;
 	}
 
@@ -1875,6 +1866,9 @@ static const struct vm_operations_struct fuse_file_vm_ops = {
 
 static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	struct fuse_file *ff = file->private_data;
+
+	ff->shortcircuit_enabled = 0;
 	if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))
 		fuse_link_write_file(file);
 
@@ -1885,6 +1879,10 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 
 static int fuse_direct_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	struct fuse_file *ff = file->private_data;
+
+	ff->shortcircuit_enabled = 0;
+
 	/* Can't provide the coherency needed for MAP_SHARED */
 	if (vma->vm_flags & VM_MAYSHARE)
 		return -ENODEV;

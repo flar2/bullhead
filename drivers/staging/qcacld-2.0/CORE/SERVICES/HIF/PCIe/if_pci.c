@@ -1160,7 +1160,8 @@ static int __hif_pci_runtime_suspend(struct pci_dev *pdev)
 		goto out;
 	}
 
-	if ((test = ol_txrx_get_tx_pending(txrx_pdev))) {
+	if ((test = ol_txrx_get_tx_pending(txrx_pdev)) ||
+		 ol_txrx_get_queue_status(txrx_pdev)) {
 		pr_err("%s: txrx pending(%d), get: %u, put: %u\n", __func__,
 				test,
 				sc->pm_stats.runtime_get,
@@ -1269,8 +1270,10 @@ static int __hif_pci_runtime_resume(struct pci_dev *pdev)
 
 	ret = __hif_pci_resume(pdev, true);
 
-	if (ret)
-		goto out;
+	if (ret) {
+		hif_pci_runtime_pm_warn(sc, "Link Resume Failed");
+		return ret;
+	}
 
 	ret = wma_runtime_resume_req(temp_module);
 	if (ret)
@@ -1286,7 +1289,13 @@ static int __hif_pci_runtime_resume(struct pci_dev *pdev)
 out:
 	/* In Resume we should never fail */
 	hif_pci_runtime_pm_warn(sc, "Runtime Resume Failed");
-	VOS_BUG(0);
+	/* skip VOS_BUG if SSR is already in progress */
+	if (!vos_is_logp_in_progress(VOS_MODULE_ID_HIF, NULL)) {
+		if (sc->ol_sc->enable_self_recovery)
+			vos_trigger_recovery(true);
+		else
+			VOS_BUG(0);
+	}
 	return ret;
 }
 
@@ -2594,7 +2603,8 @@ __hif_pci_suspend(struct pci_dev *pdev, pm_message_t state, bool runtime_pm)
         goto out;
     }
     /* Wait for pending tx completion */
-    while (ol_txrx_get_tx_pending(txrx_pdev)) {
+    while (ol_txrx_get_tx_pending(txrx_pdev) ||
+           ol_txrx_get_queue_status(txrx_pdev)) {
         msleep(OL_ATH_TX_DRAIN_WAIT_DELAY);
         if (++tx_drain_wait_cnt > OL_ATH_TX_DRAIN_WAIT_CNT) {
             printk("%s: tx frames are pending\n", __func__);
@@ -2653,18 +2663,18 @@ __hif_pci_suspend(struct pci_dev *pdev, pm_message_t state, bool runtime_pm)
         }
 
         pr_debug("%s: Suspend completes (D0WOW)\n", __func__);
+        HIFCancelDeferredTargetSleep(sc->hif_device);
         ret = 0;
         goto out;
     }
 #endif
 
-    adf_os_spin_lock_irqsave(&hif_state->suspend_lock);
-
-    /*Disable PCIe interrupts*/
-    if (HIFTargetSleepStateAdjust(targid, FALSE, TRUE) < 0) {
-        adf_os_spin_unlock_irqrestore(&hif_state->suspend_lock);
+    /* Wakeup ROME to disable PCIe interrupts */
+    if (HIFTargetSleepStateAdjust(targid, FALSE, TRUE) < 0)
         goto out;
-    }
+
+    /* Acquire lock to access shared register */
+    adf_os_spin_lock_irqsave(&hif_state->suspend_lock);
     A_PCI_WRITE32(sc->mem+(SOC_CORE_BASE_ADDRESS | PCIE_INTR_ENABLE_ADDRESS), 0);
     A_PCI_WRITE32(sc->mem+(SOC_CORE_BASE_ADDRESS | PCIE_INTR_CLR_ADDRESS),
                   PCIE_INTR_FIRMWARE_MASK | PCIE_INTR_CE_MASK_ALL);
@@ -2677,17 +2687,16 @@ __hif_pci_suspend(struct pci_dev *pdev, pm_message_t state, bool runtime_pm)
 
     hif_irq_record(HIF_SUSPEND_END, sc);
 
+    /* Put ROME to sleep */
     if (HIFTargetSleepStateAdjust(targid, TRUE, FALSE) < 0) {
         adf_os_spin_unlock_irqrestore(&hif_state->suspend_lock);
         goto out;
     }
-
     /* Stop the HIF Sleep Timer */
     HIFCancelDeferredTargetSleep(sc->hif_device);
 
     adf_os_atomic_set(&sc->pci_link_suspended, 1);
-
-    adf_os_spin_unlock_irqrestore( &hif_state->suspend_lock);
+    adf_os_spin_unlock_irqrestore(&hif_state->suspend_lock);
 
     /* Keep PCIe bus driver's shadow memory intact */
     vos_pcie_shadow_control(pdev, FALSE);
@@ -2729,6 +2738,39 @@ static int hif_pci_suspend(struct pci_dev *pdev, pm_message_t state)
     return ret;
 }
 
+/**
+ * __hif_check_link_status() - API to check if PCIe link is active/not
+ *
+ * @pdev: PCIe device structure
+ *
+ * API reads the PCIe config space to verify if PCIe link training is
+ * successful or not.
+ *
+ * Return: Success/Failure
+ */
+static int __hif_check_link_status(struct pci_dev *pdev)
+{
+	uint16_t dev_id;
+	struct hif_pci_softc *sc = pci_get_drvdata(pdev);
+
+	if (!sc) {
+		pr_err("%s: HIF Bus Context is Invalid\n", __func__);
+		return -EINVAL;
+	}
+
+	pci_read_config_word(sc->pdev, PCI_DEVICE_ID, &dev_id);
+
+	if (dev_id == sc->devid)
+		return 0;
+
+	pr_err("%s: Invalid PCIe Config Space; PCIe link down dev_id:0x%04x\n",
+	       __func__, dev_id);
+	sc->recovery = true;
+	vos_set_logp_in_progress(VOS_MODULE_ID_VOSS, TRUE);
+	vos_wlan_pci_link_down();
+	return -EACCES;
+}
+
 static int
 __hif_pci_resume(struct pci_dev *pdev, bool runtime_pm)
 {
@@ -2744,6 +2786,10 @@ __hif_pci_resume(struct pci_dev *pdev, bool runtime_pm)
 
     if (vos_is_logp_in_progress(VOS_MODULE_ID_HIF, NULL))
         return err;
+
+    err = __hif_check_link_status(pdev);
+    if (err)
+       return err;
 
     adf_os_atomic_set(&sc->pci_link_suspended, 0);
     adf_os_atomic_set(&sc->wow_done, 0);

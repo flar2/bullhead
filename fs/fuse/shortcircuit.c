@@ -12,12 +12,12 @@
  *
  */
 
-#include "fuse_stacked.h"
+#include "fuse_shortcircuit.h"
 
 #include <linux/aio.h>
 #include <linux/fs_stack.h>
 
-void fuse_setup_stacked_io(struct fuse_conn *fc, struct fuse_req *req)
+void fuse_setup_shortcircuit(struct fuse_conn *fc, struct fuse_req *req)
 {
 	int daemon_fd;
 	struct file *rw_lower_file = NULL;
@@ -26,7 +26,7 @@ void fuse_setup_stacked_io(struct fuse_conn *fc, struct fuse_req *req)
 
 	req->private_lower_rw_file = NULL;
 
-	if (!(fc->stacked_io))
+	if (!(fc->shortcircuit_io))
 		return;
 
 	if ((req->in.h.opcode != FUSE_OPEN) &&
@@ -50,10 +50,10 @@ void fuse_setup_stacked_io(struct fuse_conn *fc, struct fuse_req *req)
 	req->private_lower_rw_file = rw_lower_file;
 }
 
-static ssize_t fuse_stacked_aio_read_write(struct kiocb *iocb,
-					   const struct iovec *iov,
-					   unsigned long nr_segs,
-					   loff_t pos, int do_write)
+static ssize_t fuse_shortcircuit_aio_read_write(struct kiocb *iocb,
+						const struct iovec *iov,
+						unsigned long nr_segs,
+						loff_t pos, int do_write)
 {
 	ssize_t ret_val;
 	struct fuse_file *ff;
@@ -73,7 +73,6 @@ static ssize_t fuse_stacked_aio_read_write(struct kiocb *iocb,
 	if (do_write) {
 		if (!lower_file->f_op->aio_write)
 			return -EIO;
-
 		ret_val = lower_file->f_op->aio_write(iocb, iov, nr_segs, pos);
 
 		if (ret_val >= 0 || ret_val == -EIOCBQUEUED) {
@@ -83,7 +82,6 @@ static ssize_t fuse_stacked_aio_read_write(struct kiocb *iocb,
 	} else {
 		if (!lower_file->f_op->aio_read)
 			return -EIO;
-
 		ret_val = lower_file->f_op->aio_read(iocb, iov, nr_segs, pos);
 		if (ret_val >= 0 || ret_val == -EIOCBQUEUED)
 			fsstack_copy_attr_atime(fuse_inode, lower_inode);
@@ -96,19 +94,21 @@ static ssize_t fuse_stacked_aio_read_write(struct kiocb *iocb,
 	return ret_val;
 }
 
-ssize_t fuse_stacked_aio_read(struct kiocb *iocb, const struct iovec *iov,
-			      unsigned long nr_segs, loff_t pos)
+ssize_t fuse_shortcircuit_aio_read(struct kiocb *iocb,
+				   const struct iovec *iov,
+				   unsigned long nr_segs, loff_t pos)
 {
-	return fuse_stacked_aio_read_write(iocb, iov, nr_segs, pos, 0);
+	return fuse_shortcircuit_aio_read_write(iocb, iov, nr_segs, pos, 0);
 }
 
-ssize_t fuse_stacked_aio_write(struct kiocb *iocb, const struct iovec *iov,
-			       unsigned long nr_segs, loff_t pos)
+ssize_t fuse_shortcircuit_aio_write(struct kiocb *iocb,
+				    const struct iovec *iov,
+				    unsigned long nr_segs, loff_t pos)
 {
-	return fuse_stacked_aio_read_write(iocb, iov, nr_segs, pos, 1);
+	return fuse_shortcircuit_aio_read_write(iocb, iov, nr_segs, pos, 1);
 }
 
-void fuse_stacked_release(struct fuse_file *ff)
+void fuse_shortcircuit_release(struct fuse_file *ff)
 {
 	if (!(ff->rw_lower_file))
 		return;

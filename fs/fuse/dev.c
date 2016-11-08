@@ -7,7 +7,7 @@
 */
 
 #include "fuse_i.h"
-#include "fuse_stacked.h"
+#include "fuse_shortcircuit.h"
 
 #include <linux/init.h>
 #include <linux/module.h>
@@ -1882,7 +1882,7 @@ static ssize_t fuse_dev_do_write(struct fuse_conn *fc,
 	}
 	fuse_copy_finish(cs);
 
-	fuse_setup_stacked_io(fc, req);
+	fuse_setup_shortcircuit(fc, req);
 
 	spin_lock(&fc->lock);
 	req->locked = 0;

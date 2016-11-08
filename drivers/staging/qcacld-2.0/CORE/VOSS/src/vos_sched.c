@@ -999,7 +999,7 @@ static void vos_wd_detect_thread_stuck(void)
 		vos_flush_logs(WLAN_LOG_TYPE_FATAL,
 			       WLAN_LOG_INDICATOR_HOST_ONLY,
 			       WLAN_LOG_REASON_THREAD_STUCK,
-			       true);
+			       DUMP_VOS_TRACE);
 		spin_lock_irqsave(&gpVosWatchdogContext->thread_stuck_lock,
 			flags);
 	}
@@ -1131,7 +1131,13 @@ VosWDThread
       /* Post Msg to detect thread stuck */
       if (test_and_clear_bit(WD_WLAN_DETECT_THREAD_STUCK_MASK,
                                    &pWdContext->wdEventFlag)) {
-        vos_wd_detect_thread_stuck();
+
+       if (!test_bit(MC_SUSPEND_EVENT_MASK, &gpVosSchedContext->mcEventFlag))
+            vos_wd_detect_thread_stuck();
+       else
+            VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_INFO,
+               "%s: controller thread %s id: %d is suspended do not attemp probing",
+               __func__, current->comm, current->pid);
         /*
          * Process here and return without processing any SSR
          * related logic.
