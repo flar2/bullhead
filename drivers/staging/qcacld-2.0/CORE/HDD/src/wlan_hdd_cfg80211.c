@@ -15769,9 +15769,7 @@ wlan_hdd_cfg80211_inform_bss_frame( hdd_adapter_t *pAdapter,
      * So drop the bss and continue to next bss.
      */
     if (chan == NULL) {
-       hddLog(LOGE,
-                FL("chan pointer is NULL, chan_no: %d freq: %d"),
-                chan_no, freq);
+       hddLog(LOGE, FL("chan pointer is NULL"));
        kfree(mgmt);
        return NULL;
     }
