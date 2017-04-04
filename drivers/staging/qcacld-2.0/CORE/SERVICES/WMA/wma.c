@@ -24576,7 +24576,7 @@ static VOS_STATUS wma_enable_arp_ns_offload(tp_wma_handle wma,
 	WMI_SET_ARP_NS_OFFLOAD_CMD_fixed_param *cmd;
 	A_UINT8* buf_ptr;
 	wmi_buf_t buf;
-	int32_t len;
+	uint32_t len;
 	VOS_STATUS status = VOS_STATUS_SUCCESS;
 	u_int8_t vdev_id;
 	tpSirHostOffloadReq ns_offload_req;
@@ -24608,6 +24608,11 @@ static VOS_STATUS wma_enable_arp_ns_offload(tp_wma_handle wma,
 		ns_offload_req = hostoffloadreq;
 		arp_offload_req = &wma->interfaces[vdev_id].arp_offload_req;
 		count = hostoffloadreq->num_ns_offload_count;
+	}
+
+	if (count >= SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA) {
+		status = VOS_STATUS_E_INVAL;
+		goto err_vdev;
 	}
 
 	len = sizeof(WMI_SET_ARP_NS_OFFLOAD_CMD_fixed_param) +
@@ -35553,20 +35558,12 @@ int wma_dfs_indicate_radar(struct ieee80211com *ic,
 		WMA_LOGE("%s:DFS- Invalid WMA handle", __func__);
 		return -ENOENT;
 	}
-	radar_event = (struct wma_dfs_radar_indication *)
-		vos_mem_malloc(sizeof(struct wma_dfs_radar_indication));
-	if (radar_event == NULL)
-	{
-		WMA_LOGE("%s:DFS- Invalid radar_event", __func__);
-		return -ENOENT;
-	}
 
 	/*
 	 * Do not post multiple Radar events on the same channel.
 	 * But, when DFS test mode is enabled, allow multiple dfs
 	 * radar events to be posted on the same channel.
 	 */
-
 	adf_os_spin_lock_bh(&ic->chan_lock);
 	if (!pmac->sap.SapDfsInfo.disable_dfs_ch_switch)
 		wma->dfs_ic->disable_phy_err_processing = true;
@@ -35574,6 +35571,13 @@ int wma_dfs_indicate_radar(struct ieee80211com *ic,
 	if ((ichan->ic_ieee  != (wma->dfs_ic->last_radar_found_chan)) ||
 	    ( pmac->sap.SapDfsInfo.disable_dfs_ch_switch == VOS_TRUE) )
 	{
+		radar_event = (struct wma_dfs_radar_indication *)
+			vos_mem_malloc(sizeof(*radar_event));
+		if (radar_event == NULL) {
+			WMA_LOGE(FL("Failed to allocate memory for radar_event"));
+			return -ENOMEM;
+		}
+
 		/* Indicate the radar event to HDD to stop the netif Tx queues*/
 		hdd_radar_event.ieee_chan_number = ichan->ic_ieee;
 		hdd_radar_event.chan_freq = ichan->ic_freq;
