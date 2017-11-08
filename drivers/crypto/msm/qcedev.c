@@ -770,7 +770,7 @@ static int qcedev_sha_update(struct qcedev_async_req *qcedev_areq,
 
 				sreq->data_len = total;
 				if (i > 0)
-					for (k = 0; k < num_entries; k++) {
+					for (k = 0; k < num_entries && i+k < ARRAY_SIZE(sreq->data); k++) {
 						sreq->data[k].len =
 							sreq->data[i+k].len;
 						sreq->data[k].vaddr =
@@ -1300,7 +1300,7 @@ static int qcedev_vbuf_ablk_cipher(struct qcedev_async_req *areq,
 
 				creq->data_len = total;
 				if (i > 0)
-					for (k = 0; k < num_entries; k++) {
+					for (k = 0; k < num_entries && i+k < ARRAY_SIZE(creq->vbuf.src); k++) {
 						creq->vbuf.src[k].len =
 						creq->vbuf.src[i+k].len;
 						creq->vbuf.src[k].vaddr =
