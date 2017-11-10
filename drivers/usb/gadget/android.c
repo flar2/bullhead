@@ -3345,22 +3345,9 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 		else
 			conf = alloc_android_config(dev);
 
-		/* Always enable HID gadget function. */
-		if (!hid_enabled) {
-			name = "hid";
-			err = android_enable_function(dev, conf, name);
-			if (err)
-				pr_err("android_usb: Cannot enable '%s' (%d)", name, err);
-			else
-				hid_enabled = 1;
-		}
-
 		curr_conf = curr_conf->next;
 		while (conf_str) {
 			name = strsep(&conf_str, ",");
-
-			if (!strcmp(name, "hid"))
-				continue; /* HID already enabled above */
 
 			is_ffs = 0;
 			strlcpy(aliases, dev->ffs_aliases, sizeof(aliases));
@@ -3385,14 +3372,22 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 				continue;
 			}
 
+			if (!strcmp(name, "hid") && hid_enabled)
+				continue; /* HID already enabled, bugs out 2nd time */
+
 			if (!strcmp(name, "rndis") &&
 				!strcmp(strim(rndis_transports), "BAM2BAM_IPA"))
 				name = "rndis_qc";
 
 			err = android_enable_function(dev, conf, name);
-			if (err)
+			if (err) {
 				pr_err("android_usb: Cannot enable '%s' (%d)",
 							name, err);
+				continue;
+			}
+
+			if (!strcmp(name, "hid"))
+				hid_enabled = 1;
 		}
 	}
 
