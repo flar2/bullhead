@@ -717,17 +717,17 @@ pgoff_t page_cache_next_hole(struct address_space *mapping,
                         break;
                 index++;
                 if (index == 0)
-                        break;
-        }
+                        break;        }
 
         return index;
 }
 EXPORT_SYMBOL(page_cache_next_hole);
 
 /**
- * find_get_page - find and get a page reference
+ * find_get_page_flags - find and get a page reference
  * @mapping: the address_space to search
  * @offset: the page index
+ * @fgp_flags: flags to set on the found page (really, who added this?)
  *
  * Is there a pagecache struct page at the given (mapping, offset) tuple?
  * If yes, increment its refcount and return it; if no, return NULL.
@@ -776,7 +776,7 @@ out:
 
 	return page;
 }
-EXPORT_SYMBOL(find_get_page);
+EXPORT_SYMBOL(find_get_page_flags);
 
 /**
  * find_lock_page - locate, pin and lock a pagecache page
