@@ -1,3 +1,11 @@
+# ElementalX-6.08-extrafeatures
+### >ElementalX and:
+### >NFS client&server, XFS, Btrfs support
+### >more Atheros, Ralink and Realtek USB wifi chipsets supported
+### >config.gz enabled
+### >system v ipc for systemd in chroot (for example an arch chroot doesn't work without it)
+
+-------------------------------------------------------------------------------        
         Linux kernel release 3.x <http://kernel.org/>
 
 These are the release notes for Linux version 3.  Read them carefully,
